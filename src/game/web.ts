@@ -175,7 +175,9 @@ export class Web {
     }
 
     const { ca, cb, rest, cAlive, born } = this;
-    for (let it = 0; it < CFG.iterations; it++) {
+    // big webs need fewer passes to look right, and the headset's CPU is shared with everything else
+    const iters = this.nC > 1800 ? 6 : this.nC > 900 ? 8 : CFG.iterations;
+    for (let it = 0; it < iters; it++) {
       for (let c = 0; c < this.nC; c++) {
         if (!cAlive[c] || born[c] > t) continue;
         const a = ca[c], b = cb[c];

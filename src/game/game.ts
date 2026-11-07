@@ -158,7 +158,7 @@ export class Game {
   constructor(private world: World) {
     const env = makeEnvironment(world.renderer);
     this.silk = new SilkMesh(this.web.MC + 9000);
-    this.drops = new DropMesh(7000);
+    this.drops = new DropMesh(4500);
     this.spider = new Spider(env, CFG.spiderLength);
     this.swarm = new Swarm(env, {
       onStick: (f) => this.onStick(f),
@@ -182,6 +182,15 @@ export class Game {
       return m;
     };
     this.glow = sprite(gt, new Color(1, 0.92, 0.75));
+    const sparkMat = spriteMaterial(gt, new Color(1, 0.96, 0.88));
+    for (let k = 0; k < 24; k++) {
+      const m = new Mesh(new PlaneGeometry(1, 1), sparkMat);
+      m.renderOrder = 21;
+      m.frustumCulled = false;
+      m.visible = false;
+      this.root.add(m);
+      this.sparks.push({ m, life: 0 });
+    }
     this.hint = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.hint2 = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.halo = sprite(gt, new Color(1, 0.85, 0.55));
@@ -1113,6 +1122,8 @@ export class Game {
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
+  private sparks: { m: Mesh; life: number }[] = [];
+  private sparkNext = 0;
 
   private get silkCap() {
     return Math.min(CFG.silkMax, CFG.silkBase + CFG.silkPerFood * this.food);
@@ -1311,9 +1322,23 @@ export class Game {
       this.drips.spawn(w.p[i * 3], w.p[i * 3 + 1] - 0.003, w.p[i * 3 + 2], 0.0016 + Math.random() * 0.0012);
       w.cwet[c] -= 0.08;
     }
-    if (this.rainI > 0.1 && Math.random() < dt * 9 * this.rainI) {
+    // drops striking silk: a brief sparkle where they hit, and now and then a glassy note
+    if (this.rainI > 0.1 && Math.random() < dt * 14 * this.rainI) {
       const c = Math.floor(Math.random() * w.nC);
-      if (w.cAlive[c]) this.audio.tick(this.wpos(w.pointOn(c, Math.random(), { x: 0, y: 0, z: 0 })), 0.012 + Math.random() * 0.02);
+      if (w.cAlive[c]) {
+        const hit = w.pointOn(c, Math.random(), { x: 0, y: 0, z: 0 });
+        const sp = this.sparks[this.sparkNext];
+        this.sparkNext = (this.sparkNext + 1) % this.sparks.length;
+        sp.m.position.set(hit.x, hit.y, hit.z + 0.002);
+        sp.life = 0.22;
+        w.impulse(c, 0.5, 0, -0.0004, 0);
+        if (Math.random() < 0.35) this.audio.tick(this.wpos(hit), 0.008 + Math.random() * 0.014);
+      }
+    }
+    for (const sp of this.sparks) {
+      sp.life -= dt;
+      sp.m.visible = sp.life > 0;
+      if (sp.life > 0) sp.m.scale.setScalar(0.011 * Math.sin((sp.life / 0.22) * Math.PI));
     }
   }
 
@@ -1329,6 +1354,7 @@ export class Game {
     this.silk.uniforms.uBright.value = 1 + glow * 0.5;
     this.drops.uniforms.uGlow.value = glow;
     this.silk.uniforms.uSun.value.copy(sunW);
+    this.rain.setSun(sunW);
     this.drops.uniforms.uSun.value.copy(sunW);
     this.drops.uniforms.uFill.value.copy(fillDir).applyQuaternion(this.root.quaternion);
 

@@ -7,6 +7,16 @@ export const note = (step: number, base = 146.83) => {
   return base * Math.pow(2, o + PENTA[k] / 12);
 };
 
+// Audio parameters are only touched when they change enough to hear: scheduling an automation event
+// every frame piles up work on the audio thread and makes it crackle on Quest.
+const last = new WeakMap<AudioParam, number>();
+function glide(p: AudioParam, v: number, t: number, tc: number, eps: number) {
+  const prev = last.get(p);
+  if (prev !== undefined && Math.abs(prev - v) < eps) return;
+  last.set(p, v);
+  p.setTargetAtTime(v, t, tc);
+}
+
 export type Voice = { pos(x: number, y: number, z: number): void; level(g: number): void; pitch(f: number): void; stop(): void };
 
 export class Audio {
@@ -57,24 +67,22 @@ export class Audio {
 
   listener(px: number, py: number, pz: number, fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) {
     const l = this.ctx?.listener;
-    if (!l) return;
-    if (l.positionX) {
-      const t = this.now;
-      l.positionX.setTargetAtTime(px, t, 0.02);
-      l.positionY.setTargetAtTime(py, t, 0.02);
-      l.positionZ.setTargetAtTime(pz, t, 0.02);
-      l.forwardX.setTargetAtTime(fx, t, 0.02);
-      l.forwardY.setTargetAtTime(fy, t, 0.02);
-      l.forwardZ.setTargetAtTime(fz, t, 0.02);
-      l.upX.setTargetAtTime(ux, t, 0.02);
-      l.upY.setTargetAtTime(uy, t, 0.02);
-      l.upZ.setTargetAtTime(uz, t, 0.02);
-    }
+    if (!l || !l.positionX) return;
+    l.positionX.value = px;
+    l.positionY.value = py;
+    l.positionZ.value = pz;
+    l.forwardX.value = fx;
+    l.forwardY.value = fy;
+    l.forwardZ.value = fz;
+    l.upX.value = ux;
+    l.upY.value = uy;
+    l.upZ.value = uz;
   }
 
-  private panner(x: number, y: number, z: number) {
+  /** HRTF only for the few long-lived voices (flies); short sounds use cheap equal-power panning. */
+  private panner(x: number, y: number, z: number, hrtf = false) {
     const p = this.ctx!.createPanner();
-    p.panningModel = 'HRTF';
+    p.panningModel = hrtf ? 'HRTF' : 'equalpower';
     p.distanceModel = 'inverse';
     p.refDistance = 0.4;
     p.rolloffFactor = 1.2;
@@ -281,7 +289,7 @@ export class Audio {
   buzz(): Voice | null {
     if (!this.ctx) return null;
     const ctx = this.ctx;
-    const p = this.panner(0, 0, 0);
+    const p = this.panner(0, 0, 0, true);
     const g = ctx.createGain();
     g.gain.value = 0;
     const bp = ctx.createBiquadFilter();
@@ -320,15 +328,14 @@ export class Audio {
     am.start();
     return {
       pos: (x, y, z) => {
-        const t = this.now;
-        p.positionX.setTargetAtTime(x, t, 0.03);
-        p.positionY.setTargetAtTime(y, t, 0.03);
-        p.positionZ.setTargetAtTime(z, t, 0.03);
+        p.positionX.value = x;
+        p.positionY.value = y;
+        p.positionZ.value = z;
       },
-      level: (v) => g.gain.setTargetAtTime(v, this.now, 0.05),
+      level: (v) => glide(g.gain, v, this.now, 0.05, 0.01),
       pitch: (f) => {
-        o.frequency.setTargetAtTime(base * f, this.now, 0.05);
-        o2.frequency.setTargetAtTime(base * 2.01 * f, this.now, 0.05);
+        glide(o.frequency, base * f, this.now, 0.05, 1.5);
+        glide(o2.frequency, base * 2.01 * f, this.now, 0.05, 3);
       },
       stop: () => {
         g.gain.setTargetAtTime(0, this.now, 0.08);
@@ -342,38 +349,70 @@ export class Audio {
     };
   }
 
-  /** Rain: filtered noise, and the caller adds ticks where drops hit silk. */
+  /**
+   * Rain: one pre-rendered stereo loop of droplet patter over a soft low bed (cheap at runtime),
+   * rather than noise plus a stream of separate sounds.
+   */
   rain(level: number) {
     if (!this.ctx) return;
     const ctx = this.ctx;
     if (!this.rainGain) {
+      const sr = ctx.sampleRate, len = Math.floor(sr * 7);
+      const buf = ctx.createBuffer(2, len, sr);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        // the bed: brown noise, low and soft
+        let b = 0;
+        for (let i = 0; i < len; i++) {
+          b = (b + (Math.random() * 2 - 1) * 0.02) * 0.995;
+          d[i] = b * 0.9;
+        }
+        // the patter: hundreds of tiny drops, each a short falling chirp
+        for (let k = 0; k < 7 * 140; k++) {
+          const at = Math.floor(Math.random() * (len - sr * 0.03));
+          const f0 = 1400 + Math.random() * 4200, amp = Math.pow(Math.random(), 2.2) * 0.22;
+          const n = Math.floor(sr * (0.006 + Math.random() * 0.018));
+          let ph = 0;
+          for (let i = 0; i < n; i++) {
+            const t = i / n;
+            ph += (2 * Math.PI * f0 * (1 - 0.35 * t)) / sr;
+            d[at + i] += Math.sin(ph) * amp * Math.exp(-t * 5) * (1 - Math.exp(-i / 6));
+          }
+        }
+      }
       const s = ctx.createBufferSource();
-      s.buffer = this.noise;
+      s.buffer = buf;
       s.loop = true;
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 900;
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = 6500;
+      lp.frequency.value = 7000;
       this.rainGain = ctx.createGain();
       this.rainGain.gain.value = 0;
-      s.connect(hp);
-      hp.connect(lp);
+      s.connect(lp);
       lp.connect(this.rainGain);
       this.rainGain.connect(this.master);
       const sv = ctx.createGain();
-      sv.gain.value = 0.4;
+      sv.gain.value = 0.35;
       this.rainGain.connect(sv);
       sv.connect(this.verbIn);
       s.start();
     }
-    this.rainGain.gain.setTargetAtTime(level * 0.07, this.now, 0.6);
+    glide(this.rainGain.gain, level * 0.5, this.now, 0.6, 0.01);
   }
 
+  /** A drop striking silk: a single high glassy note, near where it hit. */
   tick(pos: [number, number, number], gain = 0.03) {
     if (!this.ctx) return;
-    this.pluck(2600 + Math.random() * 2400, gain, pos, 0.12);
+    const ctx = this.ctx, t = this.now;
+    const o = ctx.createOscillator();
+    o.frequency.value = 2400 + Math.random() * 2600;
+    const e = ctx.createGain();
+    e.gain.setValueAtTime(gain, t);
+    e.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    o.connect(e);
+    e.connect(this.out(pos, 0.5));
+    o.start(t);
+    o.stop(t + 0.1);
   }
 
   /** Silk paying out: a faint hiss that follows how fast you spin. */
@@ -394,7 +433,7 @@ export class Audio {
       this.hiss.connect(this.master);
       s.start();
     }
-    this.hiss.gain.setTargetAtTime(Math.min(1, level) * 0.035, this.now, 0.05);
+    glide(this.hiss.gain, Math.min(1, level) * 0.035, this.now, 0.05, 0.003);
   }
 
   suspend() {

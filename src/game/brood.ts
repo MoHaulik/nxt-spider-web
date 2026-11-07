@@ -30,6 +30,8 @@ type Colony = { pos: Vector3; normal: Vector3; pop: number; seed: number; segs: 
 type Baby = { p: Vector3; from: Vector3; to: Vector3; t: number; dur: number; state: 'ball' | 'fly' | 'home'; colony: Colony | null; jitter: number; ball: Vector3 };
 type Sac = { pos: Vector3; age: number; mesh: Mesh; hatched: boolean; particle: number; grow: number; quiver: number };
 
+const UP = new Vector3(0, 1, 0);
+
 const rnd = (seed: number) => {
   let s = seed >>> 0 || 1;
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -87,6 +89,8 @@ export class Brood {
   private sacGeo = new SphereGeometry(1, 20, 14);
   private o = new Object3D();
   private q = new Quaternion();
+  private d = new Vector3();
+  private at = new Vector3();
   sites: Site[] = [];
   onHatch?: (pos: Vector3) => void;
   onArrive?: (pos: Vector3) => void;
@@ -233,7 +237,7 @@ export class Brood {
     const put = (p: Vector3, dir: Vector3, scale: number) => {
       if (n >= 600) return;
       this.o.position.copy(p);
-      this.q.setFromUnitVectors(new Vector3(0, 1, 0), dir.clone().normalize());
+      this.q.setFromUnitVectors(UP, dir.normalize());
       this.o.quaternion.copy(this.q);
       this.o.scale.setScalar(scale);
       this.o.updateMatrix();
@@ -246,7 +250,7 @@ export class Brood {
       if (b.state === 'ball') {
         // the ball: they cling together and seethe a little
         b.p.copy(b.from).add(b.ball).addScaledVector(new Vector3(Math.sin(b.jitter * 7), Math.cos(b.jitter * 5), 0), 0.0015);
-        put(b.p, new Vector3(Math.sin(b.jitter), 1, 0), 0.0042);
+        put(b.p, this.d.set(Math.sin(b.jitter), 1, 0), 0.0042);
         if (b.t >= 0) {
           b.state = 'fly';
           b.colony = this.pickColony();
@@ -263,7 +267,7 @@ export class Brood {
         b.p.y += Math.sin(k * Math.PI) * 0.25;
         b.p.x += Math.sin(b.jitter * 1.7) * 0.03 * Math.sin(k * Math.PI);
         silk.push(b.from.x, b.from.y, b.from.z, b.p.x, b.p.y, b.p.z, 0.00012, 1, RADIAL + 0.5, 1 - k * 0.6, 0);
-        put(b.p, b.to.clone().sub(b.from), 0.0042);
+        put(b.p, this.d.copy(b.to).sub(b.from), 0.0042);
         if (k >= 1) {
           b.state = 'home';
           this.grow(b.colony!);
@@ -288,7 +292,7 @@ export class Brood {
       for (let i = 0; i < show && c.pop > 0; i++) {
         const sp = c.spots[i];
         const wob = Math.sin(this.time * 0.7 + i * 2 + c.seed) * 0.0015;
-        put(new Vector3(sp.x + wob, sp.y, sp.z), new Vector3(0, -1, 0), i === 0 ? 0.0042 + c.pop * 0.00012 : 0.0042);
+        put(this.at.set(sp.x + wob, sp.y, sp.z), this.d.set(0, -1, 0), i === 0 ? 0.0042 + c.pop * 0.00012 : 0.0042);
       }
     }
     this.time += dt;

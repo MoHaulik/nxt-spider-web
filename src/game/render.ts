@@ -286,7 +286,11 @@ export class DropMesh {
 
   push(x: number, y: number, z: number, r: number) {
     if (this.n >= this.max) return false;
-    (this.iPR.array as Float32Array).set([x, y, z, r], this.n++ * 4);
+    const a = this.iPR.array as Float32Array, k = this.n++ * 4;
+    a[k] = x;
+    a[k + 1] = y;
+    a[k + 2] = z;
+    a[k + 3] = r;
     return true;
   }
 
@@ -311,16 +315,21 @@ export function pushBeads(w: Web, drops: DropMesh, sizeScale: number) {
     const ax = p[i], ay = p[i + 1], az = p[i + 2];
     const ex = p[j] - ax, ey = p[j + 1] - ay, ez = p[j + 2] - az;
     const len = Math.hypot(ex, ey, ez);
-    const spacing = wet > 0.04 ? 0.006 + 0.007 * (1 - wet) : 0.0075;
-    const n = Math.min(14, Math.floor(len / spacing));
+    const spacing = wet > 0.04 ? 0.008 + 0.008 * (1 - wet) : 0.009;
+    const n = Math.min(9, Math.floor(len / spacing));
+    // water runs downhill: the big drops gather toward the lower end of each thread
+    const downhill = ey < 0 ? 1 : -1;
+    const tilt = Math.min(1, Math.abs(ey) / (len || 1)) * wet;
     const s = w.seed[c] * 97.13;
     const fade = Math.min(1, (w.time - w.born[c]) / 0.6);
     for (let b = 0; b < n; b++) {
       const h = fract(Math.sin(s + b * 12.9898) * 43758.5453);
-      const big = (b * 7 + Math.floor(s)) % 5 === 0 ? 1.6 : 1;
+      let t = (b + 0.5 + (h - 0.5) * 0.5) / n;
+      const low = downhill > 0 ? t : 1 - t; // 0 at the high end, 1 at the low end
+      const big = ((b * 7 + Math.floor(s)) % 5 === 0 ? 1.6 : 1) * (1 + tilt * (low - 0.4) * 1.2);
       const r = (glue * 0.00038 * (0.7 + h * 0.6) + wet * 0.0021 * (0.35 + h * 0.9) * big) * sizeScale * fade;
       if (r < 0.00018) continue;
-      const t = (b + 0.5 + (h - 0.5) * 0.5) / n;
+      if (tilt > 0.05) t = downhill > 0 ? Math.pow(t, 1 - tilt * 0.35) : 1 - Math.pow(1 - t, 1 - tilt * 0.35);
       if (!drops.push(ax + ex * t, ay + ey * t - r * 0.55, az + ez * t, r)) return;
     }
   }

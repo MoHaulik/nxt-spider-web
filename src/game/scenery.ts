@@ -26,6 +26,7 @@ import {
   WebGLRenderer,
 } from '@iwsdk/core';
 import { fillDir, sunCol, sunDir } from './render.js';
+export { sunCol };
 
 /** A small studio for reflections: warm low sun behind the web, a cool window to one side, dark room. */
 export function makeEnvironment(renderer: WebGLRenderer): Texture | null {
@@ -89,8 +90,13 @@ export class Rain {
     this.attr.setUsage(DynamicDrawUsage);
     g.setAttribute('position', this.attr);
     const end = new Float32Array(this.N * 2);
-    for (let i = 0; i < this.N; i++) end[i * 2 + 1] = 1;
+    const bright = new Float32Array(this.N * 2);
+    for (let i = 0; i < this.N; i++) {
+      end[i * 2 + 1] = 1;
+      bright[i * 2] = bright[i * 2 + 1] = 0.35 + Math.pow(Math.random(), 2) * 0.65;
+    }
     g.setAttribute('aEnd', new BufferAttribute(end, 1));
+    g.setAttribute('aB', new BufferAttribute(bright, 1));
     for (let i = 0; i < this.N; i++) this.respawn(i, true);
     this.mat = new ShaderMaterial({
       transparent: true,
@@ -98,16 +104,26 @@ export class Rain {
       blending: CustomBlending,
       blendSrc: OneFactor,
       blendDst: OneMinusSrcAlphaFactor,
-      uniforms: { uI: { value: 0 } },
+      uniforms: { uI: { value: 0 }, uSun: { value: new Vector3(0, 0, -1) }, uSunCol: { value: sunCol } },
       vertexShader: /* glsl */ `
-        attribute float aEnd; varying float vEnd; varying vec3 vL;
-        void main(){ vEnd = aEnd; vL = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+        attribute float aEnd; attribute float aB;
+        uniform vec3 uSun;
+        varying float vEnd; varying vec3 vL; varying float vB; varying float vGlow;
+        void main(){
+          vEnd = aEnd; vL = position; vB = aB;
+          vec4 w = modelMatrix*vec4(position,1.0);
+          // rain is seen best against the light: streaks between you and the sun catch it
+          vGlow = pow(max(0.0, dot(normalize(w.xyz - cameraPosition), uSun)), 5.0);
+          gl_Position = projectionMatrix*viewMatrix*w;
+        }`,
       fragmentShader: /* glsl */ `
-        uniform float uI; varying float vEnd; varying vec3 vL;
+        uniform float uI; uniform vec3 uSunCol;
+        varying float vEnd; varying vec3 vL; varying float vB; varying float vGlow;
         void main(){
           float r = length(vL.xz*vec2(1.0, 1.4));
-          float a = uI * 0.22 * smoothstep(1.0, 0.35, r) * (0.3 + 0.7*vEnd);
-          gl_FragColor = vec4(vec3(0.85,0.88,0.92)*a, a);
+          float a = uI * vB * (0.09 + 0.4*vGlow) * smoothstep(1.0, 0.3, r) * (0.15 + 0.85*vEnd);
+          vec3 c = mix(vec3(0.78, 0.82, 0.9), uSunCol*1.5, vGlow);
+          gl_FragColor = vec4(c*a, a);
         }`,
     });
     this.mesh = new LineSegments(g, this.mat);
@@ -124,6 +140,10 @@ export class Rain {
     this.v[i] = 3.6 + Math.random() * 1.4;
   }
 
+  setSun(worldDir: Vector3) {
+    this.mat.uniforms.uSun.value.copy(worldDir);
+  }
+
   update(dt: number, floorY: number) {
     this.mat.uniforms.uI.value = this.intensity;
     this.mesh.visible = this.intensity > 0.01;
@@ -132,13 +152,13 @@ export class Rain {
     for (let i = 0; i < this.N; i++) {
       const k = i * 3;
       this.p[k + 1] -= this.v[i] * dt;
-      this.p[k] += 0.12 * dt;
+      this.p[k] += 0.16 * dt;
       if (this.p[k + 1] < floorY) this.respawn(i, false);
       const len = 0.05 + this.v[i] * 0.012;
       P[i * 6] = this.p[k];
       P[i * 6 + 1] = this.p[k + 1] + len;
       P[i * 6 + 2] = this.p[k + 2];
-      P[i * 6 + 3] = this.p[k] - 0.002;
+      P[i * 6 + 3] = this.p[k] - 0.006;
       P[i * 6 + 4] = this.p[k + 1];
       P[i * 6 + 5] = this.p[k + 2];
     }
