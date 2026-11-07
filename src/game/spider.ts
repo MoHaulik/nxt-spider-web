@@ -18,7 +18,7 @@ import {
   Vector3,
 } from '@iwsdk/core';
 
-type Leg = { joints: Object3D[]; side: number; pair: number; yaw: number; elev: number; b1: number; b2: number; phase: number };
+type Leg = { joints: Object3D[]; side: number; pair: number; yaw: number; elev: number; b1: number; b2: number; phase: number; len: number; gw: number; gy: number; gr: number };
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -68,6 +68,9 @@ export class Spider {
   spinning = 0;
   eating = 0;
   wave = 0;
+  groom = 0; // idle: the front legs drawn through the jaws
+  holds: Vector3[] = []; // silk within reach, in the web frame: the legs take hold of it
+  private hl = Array.from({ length: 32 }, () => new Vector3());
   fullness = 1; // silk in reserve, 0..1: a plump abdomen means silk to spin
   gravid = 0; // carrying eggs, 0..1: the abdomen swells before it lays
   private t = 0;
@@ -163,7 +166,7 @@ export class Spider {
           joints.push(j);
           parent = j;
         }
-        this.legs.push({ joints, side, pair, yaw: pr.yaw, elev: pr.elev, b1: pr.b1, b2: pr.b2, phase: Math.random() * 6.28 });
+        this.legs.push({ joints, side, pair, yaw: pr.yaw, elev: pr.elev, b1: pr.b1, b2: pr.b2, phase: Math.random() * 6.28, len: pr.len, gw: 0, gy: pr.yaw, gr: 0.75 });
       }
     });
     // the palps: two short feelers at the front
@@ -217,6 +220,12 @@ export class Spider {
     this.abdomen.scale.set(0.36 * breathe * plump, 0.4 * (0.94 + 0.06 * plump + 0.12 * this.gravid), 0.33 * breathe * plump);
     this.palps.forEach((p, i) => (p.rotation.x = 0.6 + Math.sin(t * 2.3 + i * 1.9) * 0.12 + this.eating * Math.sin(t * 13 + i) * 0.3));
 
+    // silk within reach, in body space (body length 1)
+    const inv = this.q.copy(this.root.quaternion).invert();
+    const nh = Math.min(this.holds.length, this.hl.length);
+    for (let i = 0; i < nh; i++) this.hl[i].copy(this.holds[i]).sub(pos).applyQuaternion(inv).divideScalar(this.scaleM);
+    const calm = speed < 0.45 && this.unfold > 0.99;
+
     for (const L of this.legs) {
       const u = this.unfold;
       const idle = Math.sin(t * 1.3 + L.phase) * 0.05;
@@ -225,6 +234,42 @@ export class Spider {
       let elev = L.elev + idle - speed * 0.2;
       let b1 = L.b1 - idle * 0.6;
       let b2 = L.b2;
+      // taking hold: each leg reaches for the nearest thread in its own direction
+      const busy = (L.pair === 3 && this.spinning > 0.3) || (L.pair < 2 && (this.eating > 0.3 || this.groom > 0.3));
+      let want = 0;
+      if (calm && !busy) {
+        const b = L.joints[0].position;
+        let best = 0.75;
+        for (let i = 0; i < nh; i++) {
+          const h = this.hl[i];
+          const dx = h.x - b.x, dy = h.y - b.y;
+          if (Math.abs(h.z) > 0.5) continue;
+          const d = Math.hypot(dx, dy);
+          if (d < L.len * 0.45 || d > L.len * 0.98) continue;
+          const yt = Math.atan2(L.side * dx, dy);
+          const score = Math.abs(yt - L.yaw) + Math.abs(d / L.len - 0.75) * 0.6;
+          if (score < best) {
+            best = score;
+            L.gy += (yt - L.gy) * Math.min(1, dt * 10);
+            L.gr += (d / L.len - L.gr) * Math.min(1, dt * 10);
+            want = 1;
+          }
+        }
+      }
+      L.gw += (want - L.gw) * Math.min(1, dt * (want ? 5 : 3));
+      if (L.gw > 0.01) {
+        yaw += (L.gy - yaw) * L.gw * 0.85;
+        b1 += L.gw * (0.78 - L.gr) * -1.7;
+        elev -= L.gw * 0.12;
+      }
+      // grooming: the front legs drawn through the jaws in turn
+      if (L.pair === 0 && this.groom > 0) {
+        const s = Math.sin(t * 8 + (L.side > 0 ? 0 : Math.PI));
+        yaw -= this.groom * 0.4;
+        elev += this.groom * (0.85 + s * 0.2);
+        b1 -= this.groom * (0.95 + s * 0.3);
+        b2 -= this.groom * 0.5;
+      }
       // spinning: the back legs comb silk out of the spinnerets in turns
       if (L.pair === 3 && this.spinning > 0) {
         const s = Math.sin(t * 13 + (L.side > 0 ? 0 : Math.PI));

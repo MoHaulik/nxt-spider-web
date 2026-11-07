@@ -18,7 +18,7 @@ import { Audio, note, type Voice } from './audio.js';
 import { CFG, FLAGS } from './config.js';
 import { type Fly, Swarm } from './flies.js';
 import { Hands, type HandState } from './hands.js';
-import { DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
+import { sunCol, DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
 import { type Anchor, scanRoom } from './room.js';
 import { Brood, type ColonySave, type SacSave } from './brood.js';
 import { Drips, makeEnvironment, makeLights, Rain } from './scenery.js';
@@ -197,7 +197,7 @@ export class Game {
     this.star = sprite(starTexture(), new Color(1, 0.95, 0.88));
 
     this.root.add(this.silk.mesh, this.drops.mesh, this.spider.root, this.swarm.group, this.brood.group, this.rain.mesh, this.glow, this.hint, this.hint2, this.halo, this.star);
-    makeLights(this.root);
+    this.lights = makeLights(this.root);
     this.root.visible = false;
     world.scene.add(this.root, this.dimmer);
     world.player.add(this.hands.occluder);
@@ -416,6 +416,7 @@ export class Game {
     }
     this.S.set(0, this.ceilY, 0);
     this.Sprev.copy(this.S);
+    this.timeOfDay();
     this.wantScan = !this.desktop;
     if (this.desktop) this.scan(null);
     this.go('intro');
@@ -510,6 +511,17 @@ export class Game {
 
   static hasSave() {
     return !!loadSave();
+  }
+
+  /** The one line on the landing page: the chapter of the story you are in. */
+  static chapter() {
+    const s = loadSave();
+    if (!s) return 'Build a home.';
+    const families = s.colonies?.length ?? 0;
+    if (families >= 4) return 'Fill the room.';
+    if (families >= 1) return 'Let them go.';
+    if ((s.sacs?.length ?? 0) > 0 || (s.gravid ?? 0) >= 1) return 'Grow a family.';
+    return 'Maintain a web.';
   }
 
   // ---------------------------------------------------------------- per frame
@@ -903,7 +915,7 @@ export class Game {
     const fwdW = this.v1.copy(this.root.position).sub(this.head).normalize();
     (dim.uniforms.uFwd.value as Vector3).copy(fwdW);
     const amt = dim.uniforms.uAmount as { value: number };
-    const target = (this.phase === 'intro' ? smooth(0, 2 * fast, t) : 1) * (0.62 + this.rainI * 0.12);
+    const target = (this.phase === 'intro' ? smooth(0, 2 * fast, t) : 1) * (0.62 + this.rainI * 0.12 + this.nightDim);
     amt.value += (target - amt.value) * (1 - Math.exp(-dt * 2));
 
     this.spider.wave = Math.max(0, this.spider.wave - dt * 0.45);
@@ -1122,6 +1134,29 @@ export class Game {
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
+  private lights!: ReturnType<typeof makeLights>;
+  private nightDim = 0;
+
+  /**
+   * Your real time of day: mornings the web is beaded with dew and lit gold, evenings amber,
+   * nights cool moonlight. (?hour=7 overrides it for testing and filming.)
+   */
+  private timeOfDay() {
+    const q = new URLSearchParams(location.search).get('hour');
+    const h = q !== null ? +q : new Date().getHours();
+    if (h >= 5 && h < 10) {
+      sunCol.setRGB(1.0, 0.8, 0.62);
+      for (let c = 0; c < this.web.nC; c++) if (this.web.cAlive[c]) this.web.cwet[c] = Math.max(this.web.cwet[c], 0.45 + this.web.seed[c] * 0.25);
+      this.colonyWet = 0.5;
+      this.afterglow = 1;
+    } else if (h >= 17 && h < 21) {
+      sunCol.setRGB(1.0, 0.68, 0.42);
+    } else if (h >= 21 || h < 5) {
+      sunCol.setRGB(0.6, 0.7, 1.0);
+      this.nightDim = 0.1;
+    } else sunCol.setRGB(1.0, 0.86, 0.66);
+    this.lights.key.color.copy(sunCol);
+  }
   private sparks: { m: Mesh; life: number }[] = [];
   private sparkNext = 0;
 
@@ -1140,7 +1175,44 @@ export class Game {
     const w = this.web;
     const i = w.nearestP(this.S.x, this.S.y, this.S.z, 0.035);
     if (i >= 0 && w.im[i] !== 0) w.p[i * 3 + 1] -= 0.00004 * this.spider.size;
+
+    // silk within the legs' reach: they take hold of it
+    const reach = 1.9 * this.spider.scaleM;
+    const holds = this.spider.holds;
+    holds.length = 0;
+    const p = w.p;
+    for (let c = 0; c < w.nC && holds.length < 32; c++) {
+      if (!w.cAlive[c] || w.born[c] > w.time) continue;
+      for (const t of [0.25, 0.5, 0.75]) {
+        const a = w.ca[c] * 3, b = w.cb[c] * 3;
+        const x = p[a] + (p[b] - p[a]) * t, y = p[a + 1] + (p[b + 1] - p[a + 1]) * t, z = p[a + 2] + (p[b + 2] - p[a + 2]) * t;
+        const dx = x - this.S.x, dy = y - this.S.y, dz = z - this.S.z;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        const v = this.holdPool[holds.length];
+        holds.push(v.set(x, y, z));
+        if (holds.length >= 32) break;
+      }
+    }
+
+    // behaviour: face a struggling fly; when nothing is happening, groom and look about
+    if (this.phase !== 'intro') {
+      let want = Math.sin(this.clock * 0.13) * 0.22;
+      const prey = this.swarm.flies.find((f) => f.state === 'stuck' && !f.wrapped);
+      if (prey) want = clamp((prey.p.x - this.S.x) * 3, -0.9, 0.9);
+      this.twist += (want - this.twist) * (1 - Math.exp(-dt * 2.2));
+      this.groomT -= dt;
+      const quiet = !this.live && !prey && this.spider.eating < 0.1 && this.stillT > 2.5 && !this.layingSac;
+      if (this.groomT <= 0 && quiet) {
+        this.groomT = rand(10, 18);
+        this.grooming = 1.8;
+      }
+      this.grooming = Math.max(0, this.grooming - dt);
+      this.spider.groom += ((this.grooming > 0 && quiet ? 1 : 0) - this.spider.groom) * (1 - Math.exp(-dt * 5));
+    }
   }
+  private holdPool = Array.from({ length: 32 }, () => new Vector3());
+  private groomT = 8;
+  private grooming = 0;
 
   /** Your fingertip on a thread plucks it: it rings, sways, and the spider turns to look. */
   private touch(dt: number) {
@@ -1395,6 +1467,10 @@ export class Game {
   }
 
   private sound() {
+    if (this.phase !== 'intro') {
+      const density = Math.min(1, this.web.totalLength(CAPTURE) * 0.15 + this.brood.colonies.length * 0.06 + this.eaten * 0.02);
+      this.audio.score(density, this.rainI > 0.3 ? 1 : this.afterglow > 0.2 ? 2 : 0);
+    }
     this.audio.listener(this.head.x, this.head.y, this.head.z, this.fwd.x, this.fwd.y, this.fwd.z, this.up.x, this.up.y, this.up.z);
     for (const [f, v] of this.voices) {
       if (f.state === 'gone') {

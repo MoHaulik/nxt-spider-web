@@ -415,6 +415,55 @@ export class Audio {
     o.stop(t + 0.1);
   }
 
+  // ---------------- the score ----------------
+  private nextNote = 0;
+  private lastStep = 7;
+
+  /**
+   * A generative score made of the ecosystem: soft felt-piano notes, sparse while the web is young and
+   * fuller as it grows. `mood` colours the harmony: 0 dry, 1 rain (minor), 2 sun after rain (bright).
+   */
+  score(density: number, mood: 0 | 1 | 2) {
+    if (!this.ctx) return;
+    const t = this.now;
+    if (t < this.nextNote) return;
+    const gap = 7 / (0.45 + density * 1.6);
+    this.nextNote = t + gap * (0.6 + Math.random() * 0.8);
+    // a slow melodic walk: mostly steps, sometimes a leap, staying in a gentle range
+    const leap = Math.random() < 0.2 ? (Math.random() < 0.5 ? -3 : 3) : Math.random() < 0.5 ? -1 : 1;
+    this.lastStep = Math.max(3, Math.min(12, this.lastStep + leap));
+    const base = mood === 1 ? 61.74 : 73.42; // rain shifts the scale down to a minor colour
+    const f = note(this.lastStep, base) * 2;
+    this.felt(f, 0.03 + density * 0.012, t);
+    if (Math.random() < 0.25 + density * 0.25) this.felt(note(this.lastStep - (mood === 2 ? 2 : 3), base) * 2, 0.018, t + 0.08);
+    if (mood === 2 && Math.random() < 0.5) this.felt(note(this.lastStep + 5, base) * 2, 0.012, t + 0.6);
+  }
+
+  /** A felt-piano note: a soft hammer, a warm body, a long room. */
+  private felt(f: number, gain: number, t: number) {
+    const ctx = this.ctx!;
+    const g = this.out(undefined, 1.0);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2200, t);
+    lp.frequency.exponentialRampToValueAtTime(500, t + 2.5);
+    lp.connect(g);
+    for (const [m, a, type] of [[1, 1, 'triangle'], [2, 0.18, 'sine'], [3.01, 0.06, 'sine']] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f * m;
+      const e = ctx.createGain();
+      e.gain.setValueAtTime(0, t);
+      e.gain.linearRampToValueAtTime(gain * a, t + 0.012);
+      e.gain.exponentialRampToValueAtTime(gain * a * 0.35, t + 0.5);
+      e.gain.exponentialRampToValueAtTime(0.0001, t + 4.2);
+      o.connect(e);
+      e.connect(lp);
+      o.start(t);
+      o.stop(t + 4.3);
+    }
+  }
+
   /** Silk paying out: a faint hiss that follows how fast you spin. */
   spinHiss(level: number) {
     if (!this.ctx) return;

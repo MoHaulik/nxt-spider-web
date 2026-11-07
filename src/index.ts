@@ -10,16 +10,16 @@ World.create($('scene-container') as HTMLDivElement, projectOptions).then(async 
   const enter = $('enter') as HTMLButtonElement;
   const preview = $('preview') as HTMLButtonElement;
   const fresh = $('fresh') as HTMLButtonElement;
-  const note = $('note');
   const ar = !!navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false));
 
-  if (Game.hasSave()) {
-    enter.textContent = 'Return to your web';
-    fresh.hidden = false;
-  }
+  // one line: where you are in the story
+  $('line').textContent = Game.chapter();
+  fresh.hidden = !Game.hasSave();
   if (!ar) {
     enter.hidden = true;
-    note.textContent = 'Open this page in the Meta Quest browser to play in your room. Here you can watch a preview: the mouse is your hand, hold the button to spin.';
+    preview.hidden = false;
+    fresh.hidden = true;
+    $('note').hidden = false;
   }
 
   const start = (desktop: boolean) => {
@@ -39,8 +39,8 @@ World.create($('scene-container') as HTMLDivElement, projectOptions).then(async 
   };
   world.visibilityState.subscribe((v) => {
     if (v === 'non-immersive' && GossamerSystem.game?.phase !== 'idle' && !GossamerSystem.game?.desktop) {
+      $('line').textContent = Game.chapter();
       $('landing').classList.remove('gone');
-      enter.textContent = 'Return to your web';
     }
   });
 });
