@@ -198,6 +198,7 @@ export class DropMesh {
     uFill: { value: new Vector3() },
     uSunCol: { value: sunCol },
     uMinR: { value: 0.0011 },
+    uGlow: { value: 0 },
   };
 
   constructor(max: number) {
@@ -229,7 +230,7 @@ export class DropMesh {
           gl_Position = projectionMatrix * viewMatrix * vec4(C + (right*position.x + up*position.y)*rr, 1.0);
         }`,
       fragmentShader: /* glsl */ `
-        uniform vec3 uSun; uniform vec3 uFill; uniform vec3 uSunCol;
+        uniform vec3 uSun; uniform vec3 uFill; uniform vec3 uSunCol; uniform float uGlow;
         varying vec2 vUv; varying vec3 vRight; varying vec3 vUp; varying vec3 vFwd; varying float vScale; varying float vR;
         ${spectral}
         vec3 L;
@@ -267,6 +268,7 @@ export class DropMesh {
           float rim = smoothstep(0.78, 0.98, sqrt(r2));
           float back = pow(max(0.0, dot(I, L)), 2.0);
           col += spectral(atan(vUv.y, vUv.x)*0.159 + r2*1.3) * rim * (0.12 + back*0.5);
+          col *= 1.0 + uGlow*0.7;
           float alpha = (0.62 + 0.38*fres + min(spec, 1.0)) * vScale;
           alpha *= smoothstep(1.0, 0.92, r2);
           alpha = clamp(alpha, 0.0, 1.0);

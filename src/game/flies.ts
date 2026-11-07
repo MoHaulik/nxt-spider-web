@@ -59,8 +59,9 @@ function makeShared(env: Texture | null) {
   const wingGeo = new PlaneGeometry(1, 1);
   wingGeo.rotateX(-Math.PI / 2);
   wingGeo.translate(0.5, 0, -0.5);
+  const parcel = new MeshPhysicalMaterial({ color: new Color(0.93, 0.9, 0.84), roughness: 0.7, sheen: 1, sheenColor: new Color(1, 1, 0.95), sheenRoughness: 0.4, envMap: env });
   return {
-    eye, thorax, abdomen, golden, leg, wing, wingGeo,
+    eye, thorax, abdomen, golden, leg, wing, wingGeo, parcel,
     sphere: new SphereGeometry(1, 24, 16),
     legGeo: new CylinderGeometry(0.008, 0.014, 1, 5).translate(0, -0.5, 0),
   };
@@ -85,6 +86,7 @@ export class Fly {
   leaving = false;
   golden: boolean;
   sure = false; // the first fly always sticks
+  wrapped = false; // caught and wrapped in silk while you were away: food in the larder
   private wings: Mesh[] = [];
   private legs: Object3D[] = [];
   private s: ReturnType<typeof makeShared>;
@@ -124,8 +126,24 @@ export class Fly {
     this.g.traverse((o) => ((o as Mesh).frustumCulled = false));
   }
 
+  /** Wrap it: a pale silk parcel, the way an orb-weaver stores a meal. */
+  wrap() {
+    this.wrapped = true;
+    for (const c of this.g.children) c.visible = false;
+    const m = new Mesh(this.s.sphere, this.s.parcel);
+    m.scale.set(0.3, 0.3, 0.55);
+    this.g.add(m);
+    this.heading.set(0, -1, 0.2).normalize();
+  }
+
   /** Visual update: orientation, wing blur, kicking legs. */
   animate(dt: number, t: number) {
+    if (this.wrapped) {
+      this.g.position.copy(this.p);
+      this.g.position.y -= 0.004;
+      this.g.lookAt(this.p.clone().add(this.heading));
+      return;
+    }
     const flying = this.state === 'fly';
     const kicking = this.state === 'stuck' && this.burst > 0;
     this.wings.forEach((w, i) => {
@@ -248,6 +266,10 @@ export class Swarm {
         if (f.leaving && f.p.length() > 3.2) f.state = 'gone';
       } else if (f.state === 'stuck') {
         if (!web.cAlive[f.stuckC]) {
+          if (f.wrapped) {
+            f.state = 'gone';
+            continue;
+          }
           f.state = 'fly';
           f.leaving = true;
           f.retarget = 0;
@@ -256,6 +278,10 @@ export class Swarm {
         }
         web.pointOn(f.stuckC, f.stuckT, this.tmp);
         f.p.set(this.tmp.x, this.tmp.y, this.tmp.z + 0.003);
+        if (f.wrapped) {
+          f.animate(dt, t);
+          continue;
+        }
         f.nextBurst -= dt;
         if (f.nextBurst <= 0) {
           f.burst = rand(0.3, 0.7);
@@ -282,7 +308,27 @@ export class Swarm {
     this.flies = this.flies.filter((f) => f.state !== 'gone');
   }
 
+  /** A meal caught while you were away, hanging wrapped on the capture spiral. */
+  parcel(web: Web) {
+    for (let tries = 0; tries < 40; tries++) {
+      const c = Math.floor(Math.random() * web.nC);
+      if (!web.cAlive[c] || web.kind[c] !== CAPTURE) continue;
+      const f = new Fly(this.env);
+      f.wrap();
+      f.state = 'stuck';
+      f.stuckC = c;
+      f.stuckT = 0.3 + Math.random() * 0.4;
+      f.escape = Infinity;
+      web.pointOn(c, f.stuckT, this.tmp);
+      f.p.set(this.tmp.x, this.tmp.y, this.tmp.z);
+      this.flies.push(f);
+      this.group.add(f.g);
+      return f;
+    }
+    return null;
+  }
+
   alive() {
-    return this.flies.filter((f) => f.state === 'fly' || f.state === 'stuck').length;
+    return this.flies.filter((f) => (f.state === 'fly' || f.state === 'stuck') && !f.wrapped).length;
   }
 }

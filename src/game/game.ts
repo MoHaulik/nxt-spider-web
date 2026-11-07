@@ -20,7 +20,8 @@ import { type Fly, Swarm } from './flies.js';
 import { Hands, type HandState } from './hands.js';
 import { DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
 import { type Anchor, scanRoom } from './room.js';
-import { Drips, makeEnvironment, makeLights, Rain, textCard } from './scenery.js';
+import { Brood, type ColonySave, type SacSave } from './brood.js';
+import { Drips, makeEnvironment, makeLights, Rain } from './scenery.js';
 import { Spider } from './spider.js';
 import { CAPTURE, DRAG, MOOR, RADIAL, Web } from './web.js';
 
@@ -34,7 +35,11 @@ type Save = {
   ceilY: number;
   floorY: number;
   anchorId?: string;
+  colonies?: ColonySave[];
+  sacs?: SacSave[];
+  parcels?: number;
   savedAt: number;
+  born?: number;
 };
 
 const clamp = (x: number, a: number, b: number) => (x < a ? a : x > b ? b : x);
@@ -65,13 +70,15 @@ export class Game {
   audio = new Audio();
   private rain = new Rain();
   private drips = new Drips();
+  private brood: Brood;
+  private colonyWet = 0;
+  private laying = 0;
   private dimmer = makeDimmer();
   private glow: Mesh;
   private hint: Mesh;
+  private hint2: Mesh;
   private halo: Mesh;
   private star: Mesh;
-  private title = textCard([{ text: 'GOSSAMER', size: 120, spacing: 38 }]);
-  private count = textCard([{ text: '', size: 90 }], 512, 256);
 
   phase: Phase = 'idle';
   private phaseT = 0;
@@ -129,6 +136,7 @@ export class Game {
   private wantScan = false;
   private restoreWait = 0;
   private paused = false;
+  private tuned = false;
 
   // desktop preview
   desktop = false;
@@ -148,7 +156,7 @@ export class Game {
 
   constructor(private world: World) {
     const env = makeEnvironment(world.renderer);
-    this.silk = new SilkMesh(this.web.MC + 32);
+    this.silk = new SilkMesh(this.web.MC + 9000);
     this.drops = new DropMesh(7000);
     this.spider = new Spider(env, CFG.spiderLength);
     this.swarm = new Swarm(env, {
@@ -156,6 +164,12 @@ export class Game {
       onEscape: (f) => this.audio.pluck(note(3), 0.05, this.wpos(f.p)),
       onBounce: (f, c) => this.audio.pluck(note(8 + Math.floor(this.web.seed[c] * 5)), 0.05, this.wpos(f.p), 0.6),
     });
+    this.brood = new Brood(env);
+    this.brood.onHatch = (p) => {
+      this.audio.chord([10, 12, 14, 17], 0.05, 5);
+      for (let k = 0; k < 6; k++) this.later.push({ t: this.clock + k * 0.18, fn: () => this.audio.pluck(note(15 + k), 0.03, this.wpos(p), 1.2) });
+    };
+    this.brood.onArrive = (p) => this.audio.pluck(note(16 + Math.floor(Math.random() * 4)), 0.02, this.wpos(p), 0.8);
     this.web.onBreak = (_c, x, y, z) => this.audio.snap(this.wpos(this.v3.set(x, y, z)));
 
     const gt = glowTexture();
@@ -168,10 +182,11 @@ export class Game {
     };
     this.glow = sprite(gt, new Color(1, 0.92, 0.75));
     this.hint = sprite(gt, new Color(0.95, 0.9, 0.8));
+    this.hint2 = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.halo = sprite(gt, new Color(1, 0.85, 0.55));
     this.star = sprite(starTexture(), new Color(1, 0.95, 0.88));
 
-    this.root.add(this.silk.mesh, this.drops.mesh, this.spider.root, this.swarm.group, this.rain.mesh, this.glow, this.hint, this.halo, this.star, this.title.mesh, this.count.mesh);
+    this.root.add(this.silk.mesh, this.drops.mesh, this.spider.root, this.swarm.group, this.brood.group, this.rain.mesh, this.glow, this.hint, this.hint2, this.halo, this.star);
     makeLights(this.root);
     this.root.visible = false;
     world.scene.add(this.root, this.dimmer);
@@ -209,6 +224,14 @@ export class Game {
       return;
     }
     this.paused = v === VisibilityState.VisibleBlurred;
+    const session = this.world.session as (XRSession & { updateTargetFrameRate?: (r: number) => Promise<void>; supportedFrameRates?: Float32Array }) | undefined;
+    if (session && !this.tuned) {
+      this.tuned = true;
+      // fine silk needs full resolution where you look; the periphery can be cheaper
+      this.world.renderer.xr.setFoveation(0.35);
+      const rates = session.supportedFrameRates ? [...session.supportedFrameRates] : [];
+      if (rates.includes(72)) session.updateTargetFrameRate?.(72).catch(() => {});
+    }
     if (this.paused) {
       this.persist();
       this.audio.suspend();
@@ -233,6 +256,8 @@ export class Game {
       if (e.key === 'f') this.spawnFly(false);
       if (e.key === 'r') this.toggleRain();
       if (e.key === 'n') this.skip();
+      if (e.key === 'e') this.laySac();
+      if (e.key === 'h') this.brood.hatchAll();
     });
   }
 
@@ -369,6 +394,7 @@ export class Game {
       this.web.floorY = this.floorY;
       this.framed = true;
       this.spider.size = this.sizeFor(this.food);
+      this.awayFor(hours);
     } else {
       this.floorY = -this.root.position.y;
       this.web.floorY = this.floorY;
@@ -376,7 +402,8 @@ export class Game {
     }
     this.S.set(0, this.ceilY, 0);
     this.Sprev.copy(this.S);
-    this.wantScan = !this.desktop && !this.returning;
+    this.wantScan = !this.desktop;
+    if (this.desktop) this.scan(null);
     this.go('intro');
     if (this.desktop) {
       this.toggleDesktopBg(true);
@@ -399,6 +426,7 @@ export class Game {
       this.web.floorY = this.floorY;
     }
     this.anchors = room.anchors;
+    this.brood.sites = room.sites;
     if (FLAGS.debug) console.log('[gossamer] room', room);
   }
 
@@ -446,7 +474,8 @@ export class Game {
     if (!this.framed || this.desktop && !FLAGS.debug) return;
     if (this.phase === 'idle' || this.phase === 'placing' || this.phase === 'intro' && !this.returning) return;
     try {
-      const s: Save = { web: this.web.serialize(), food: this.food, eaten: this.eaten, ceilY: this.ceilY, floorY: this.floorY, anchorId: this.anchorId, savedAt: Date.now() };
+      const s: Save = { web: this.web.serialize(), food: this.food, eaten: this.eaten, ceilY: this.ceilY, floorY: this.floorY, anchorId: this.anchorId, savedAt: Date.now(), born: this.save?.born ?? Date.now(),
+        ...this.brood.save(), parcels: this.swarm.flies.filter((f) => f.wrapped).length };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
       this.save = s;
     } catch {}
@@ -627,7 +656,8 @@ export class Game {
       this.audio.pluck(note(7), 0.05, this.wpos(s), 0.5);
     }
     const L = this.live;
-    this.spider.spinning += ((L ? 1 : 0) - this.spider.spinning) * (1 - Math.exp(-dt * 8));
+    this.laying = Math.max(0, this.laying - dt);
+    this.spider.spinning += ((L || this.laying > 0 ? 1 : 0) - this.spider.spinning) * (1 - Math.exp(-dt * 8));
     if (!L) {
       this.attachTarget = -1;
       this.audio.spinHiss(0);
@@ -667,23 +697,51 @@ export class Game {
       w.deg[L.head]--;
       w.deg[target]++;
       w.killP(L.head);
-      for (const c of L.cs) {
-        if (!w.cAlive[c]) continue;
-        w.base[c] = w.dist(w.ca[c], w.cb[c]) * CFG.tension;
-        w.glint[c] = 1;
-      }
       L.ids.push(target);
+      const done = this.tauten(L.ids, L.cs);
       w.connectivity();
       this.threadsDone++;
       const len = L.len;
-      this.audio.pluck(note(Math.round(12 - len * 8)), 0.16, this.wpos(w.pointOn(L.cs[0], 0.5, { x: 0, y: 0, z: 0 })), 2.4);
-      this.layCapture(L.ids);
+      this.audio.pluck(note(Math.round(12 - len * 8)), 0.16, this.wpos(this.S), 2.4);
+      this.layCapture(done);
     } else {
       w.im[L.head] = 1; // a loose end: it dangles, and dissolves if nothing holds it
       w.connectivity();
       this.audio.pluck(note(2), 0.04, this.wpos(this.S), 0.4);
     }
   }
+
+  /**
+   * Silk is pulled taut when it is tied off. A thread you swing across the middle becomes two true radii
+   * meeting at the hub: you choose where they go, the spider does the craft, and the web reads as an orb.
+   * Returns the particles of the finished thread(s).
+   */
+  private tauten(ids: number[], cs: number[]): number[] {
+    const w = this.web, p = w.p;
+    let minR = Infinity;
+    for (let i = 1; i < ids.length - 1; i++) minR = Math.min(minR, Math.hypot(p[ids[i] * 3], p[ids[i] * 3 + 1]));
+    const a = ids[0], b = ids[ids.length - 1];
+    const ra = Math.hypot(p[a * 3], p[a * 3 + 1]), rb = Math.hypot(p[b * 3], p[b * 3 + 1]);
+    // both ends must be tied to something else, or removing this thread would free them
+    if (minR < 0.13 && ra > 0.1 && rb > 0.1 && (w.deg[a] > 1 || w.im[a] === 0) && (w.deg[b] > 1 || w.im[b] === 0)) {
+      for (const c of cs) w.killC(c);
+      if (this.hub < 0 || !w.pAlive[this.hub]) this.hub = w.addP(0, 0, 0, 1);
+      const thick = w.thick[cs[0]] || CFG.baseThick;
+      const one = w.chain(a, this.hub, RADIAL, thick, CFG.spacing, CFG.tension);
+      const two = w.chain(this.hub, b, RADIAL, thick, CFG.spacing, CFG.tension);
+      for (let c = 0; c < w.nC; c++) if (w.cAlive[c] && w.born[c] === w.time) w.glint[c] = 1;
+      return [...one, ...two.slice(1)];
+    }
+    const n = ids.length - 1;
+    const len = (w.dist(a, b) / n) * CFG.tension;
+    for (const c of cs) {
+      if (!w.cAlive[c]) continue;
+      w.base[c] = len;
+      w.glint[c] = 1;
+    }
+    return ids;
+  }
+  private hub = -1;
 
   /**
    * The sticky spiral breathes in. Like a real orb-weaver's capture spiral, each new rung joins a point
@@ -753,15 +811,9 @@ export class Game {
 
     if (this.phase === 'intro') {
       const ret = this.returning;
-      const T0 = ret ? 0 : 1.5 * fast, T1 = ret ? 0 : 7.5 * fast; // title
-      const G0 = ret ? 1 : 8 * fast; // glint
-      const D0 = ret ? 2 : 9.5 * fast, D1 = D0 + (ret ? 5 : 10 * fast); // descent
-      if (!ret) {
-        this.title.mesh.position.set(0, 0.16, -0.25);
-        this.title.mesh.scale.setScalar(0.085);
-        this.title.mesh.quaternion.identity();
-        this.title.set(smooth(T0, T0 + 2, t) * (1 - smooth(T1, T1 + 2, t)));
-      }
+      // no words: the room darkens, something glints at the ceiling, and it comes down
+      const G0 = ret ? 1 : 3.5 * fast; // glint
+      const D0 = ret ? 2.5 : 5 * fast, D1 = D0 + (ret ? 5.5 : 10 * fast); // descent
       // the glint: something catches the light up at the ceiling
       this.star.visible = t > G0 && t < D0 + 3;
       this.star.position.set(0, this.ceilY - 0.02, 0);
@@ -781,10 +833,10 @@ export class Game {
       if (t >= D1 + 0.8) {
         this.arrive();
         this.go(this.returning ? 'free' : 'swing');
+        if (this.returning && this.brood.pendingSacs()) this.later.push({ t: this.clock + 2.5, fn: () => this.brood.hatchAll() });
       }
       return;
     }
-    this.title.set(0);
     this.star.visible = false;
 
     // the hint light: a small soft point that shows where your hand goes
@@ -817,6 +869,19 @@ export class Game {
     if (this.phase === 'firstfly' && t > 28 && !this.swarm.flies.some((f) => f.state === 'stuck')) {
       this.spawnFly(true);
       this.phaseT = 0;
+    }
+    // the pinch cue: two soft points at your fingertips that close together, once, before your first thread
+    const h2 = this.active;
+    const pinchCue = this.phase === 'spin' && this.threadsDone === 0 && !this.live && t > 2 && !!h2?.seen && !this.desktop;
+    this.hint2.visible = pinchCue;
+    if (pinchCue && h2) {
+      const c = this.handLocal({ ...h2, pos: h2.pinch }, this.v2);
+      const k = 0.5 + 0.5 * Math.cos(this.clock * 4.2);
+      this.hint.visible = hintOn = true;
+      this.hint.position.set(c.x - 0.022 * k, c.y + 0.012 * k, c.z);
+      this.hint2.position.set(c.x + 0.022 * k, c.y - 0.012 * k, c.z);
+      this.hint.scale.setScalar(0.014);
+      this.hint2.scale.setScalar(0.014);
     }
     this.hint.visible = hintOn;
     (this.hint.material as unknown as { uniforms: { uOpacity: { value: number } } }).uniforms.uOpacity.value = 0.6 + Math.sin(this.clock * 3) * 0.25;
@@ -898,19 +963,47 @@ export class Game {
       this.slowmo = 1.4;
       this.audio.chord([5, 9, 12, 14], 0.08, 6, 0.9);
     }
-    // the tally: a small number that fades
-    const c = this.count;
-    c.mesh.removeFromParent();
-    this.count = textCard([{ text: String(this.eaten), size: 110 }], 512, 256);
-    this.count.mesh.position.set(0, -this.bounds - 0.06, 0.02);
-    this.count.mesh.scale.setScalar(0.07);
-    this.root.add(this.count.mesh);
-    this.countT = 0;
     this.web.glint.fill(0.6);
+    if (this.eaten % 6 === 0) this.later.push({ t: this.clock + 1.3, fn: () => this.laySac() });
     this.persist();
     if (this.phase === 'eat') this.go('free');
   }
-  private countT = 9;
+  private afterglow = 0;
+
+  /** The spider spins an egg sac into the web, just above where it hangs. */
+  private laySac() {
+    const s = this.spider.local(this.spider.spinneret, this.v1);
+    const i = this.web.nearestP(s.x, s.y, s.z, 0.2);
+    if (i < 0) return;
+    this.laying = 2.2;
+    const p = this.web.p;
+    this.brood.lay(new Vector3(p[i * 3], p[i * 3 + 1] - 0.011, p[i * 3 + 2]), i);
+    this.audio.chord([0, 2, 7], 0.05, 4);
+    this.audio.pluck(note(9), 0.06, this.wpos(s), 2);
+    this.persist();
+  }
+
+  /** What happened while you were gone: meals wrapped and stored, some silk fallen, the families grown. */
+  private awayFor(hours: number) {
+    const sv = this.save!;
+    const w = this.web;
+    if (sv.colonies) this.brood.restoreColonies(sv.colonies);
+    for (const sc of sv.sacs ?? []) {
+      const pos = new Vector3().fromArray(sc.p);
+      this.brood.lay(pos, w.nearestP(pos.x, pos.y + 0.011, pos.z, 0.1), sc.age);
+    }
+    if (hours > 0.2) this.brood.passTime(hours);
+    // the spider stayed by its hub and kept that part whole
+    for (let c = 0; c < w.nC; c++) {
+      if (!w.cAlive[c]) continue;
+      const i = w.ca[c] * 3;
+      if (Math.hypot(w.p[i], w.p[i + 1]) < 0.12) w.hp[c] = 1;
+      else if (hours > 2 && w.kind[c] === CAPTURE && Math.random() < 0.12) w.killC(c);
+    }
+    w.connectivity();
+    const meals = Math.min(6, (sv.parcels ?? 0) + (hours > 0.25 ? Math.max(1, Math.floor(hours * 1.2)) : 0));
+    for (let k = 0; k < meals; k++) this.swarm.parcel(w);
+  }
 
   private weather(dt: number) {
     if (this.phase === 'free' && this.raining <= 0) {
@@ -920,7 +1013,11 @@ export class Game {
         this.rainClock = rand(...CFG.rainGap);
       }
     }
-    if (this.raining > 0) this.raining -= dt;
+    if (this.raining > 0) {
+      this.raining -= dt;
+      if (this.raining <= 0) this.afterglow = 1; // the sun comes back onto a soaked web
+    }
+    this.afterglow = Math.max(0, this.afterglow - dt / 30);
     const want = this.raining > 0 ? smooth(0, 6, CFG.rainLength - this.raining) * smooth(0, 6, this.raining) : 0;
     this.rainI += (want - this.rainI) * (1 - Math.exp(-dt * 1.5));
     this.rain.intensity = this.rainI;
@@ -951,12 +1048,18 @@ export class Game {
   private draw(dt: number) {
     const w = this.web;
     const thickScale = 1;
-    const sunW = this.v1.copy(sunDir).applyQuaternion(this.root.quaternion);
+    // the light drifts very slowly, so glints crawl along the threads even when nothing moves
+    const drift = Math.sin(this.clock * 0.045) * 0.3;
+    const sunW = this.v1.set(sunDir.x + drift, sunDir.y - this.afterglow * 0.12, sunDir.z).normalize().applyQuaternion(this.root.quaternion);
+    const glow = smooth(0, 0.25, this.afterglow) * this.afterglow;
+    this.silk.uniforms.uBright.value = 1 + glow * 0.5;
+    this.drops.uniforms.uGlow.value = glow;
     this.silk.uniforms.uSun.value.copy(sunW);
     this.drops.uniforms.uSun.value.copy(sunW);
     this.drops.uniforms.uFill.value.copy(fillDir).applyQuaternion(this.root.quaternion);
 
     this.silk.begin();
+    this.drops.begin();
     this.silk.pushWeb(w, thickScale);
     // the dragline: from the spinnerets up to the ceiling
     const s = this.spider.local(this.spider.spinneret, this.v2);
@@ -966,11 +1069,12 @@ export class Game {
     const reach = (this.ceilY - s.y) / dir.y;
     const dthick = CFG.baseThick * (0.9 + this.grow01 * 0.8);
     if (this.phase !== 'placing') this.silk.push(s.x, s.y, s.z, s.x + dir.x * reach, s.y + dir.y * reach, s.z + dir.z * reach, dthick, 1, DRAG + 0.3, 1, 0);
-    this.silk.end();
-
-    this.drops.begin();
     pushBeads(w, this.drops, 1 + this.grow01 * 0.4);
     this.drips.update(dt, this.floorY, (x, y, z, r) => this.drops.push(x, y, z, r));
+    this.colonyWet = this.rainI > 0.05 ? Math.min(1, this.colonyWet + dt * 0.03) : Math.max(0, this.colonyWet - dt * 0.005);
+    const pp = this.v3;
+    this.brood.update(dt, this.colonyWet, this.silk, this.drops, (i) => (i >= 0 && w.pAlive[i] ? pp.set(w.p[i * 3], w.p[i * 3 + 1], w.p[i * 3 + 2]) : null), FLAGS.fast ? 25 : 150);
+    this.silk.end();
     this.drops.end();
 
     // where the silk will catch when you let go
@@ -988,8 +1092,6 @@ export class Game {
       this.halo.position.z += 0.004;
       this.halo.scale.setScalar(0.05 + Math.sin(this.clock * 3) * 0.01);
     }
-    this.countT += dt;
-    this.count.set(smooth(0, 0.5, this.countT) * (1 - smooth(2.5, 4, this.countT)));
   }
 
   private sound() {
