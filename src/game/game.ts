@@ -405,6 +405,7 @@ export class Game {
     this.wantScan = !this.desktop;
     if (this.desktop) this.scan(null);
     this.go('intro');
+    if (!this.desktop) this.world.scene.background = null; // passthrough: nothing behind the room
     if (this.desktop) {
       this.toggleDesktopBg(true);
       if (FLAGS.closeup) this.world.camera.position.lerp(this.root.position, 0.62);
@@ -544,7 +545,7 @@ export class Game {
   private hideInputVisuals(dt: number) {
     this.hideClock -= dt;
     if (this.hideClock > 0) return;
-    this.hideClock = 0.5;
+    this.hideClock = 0.1;
     this.world.player.traverse((o: Object3D) => {
       if (o === this.hands.occluder) return;
       if ((o as Mesh).isMesh || (o as unknown as { isLine?: boolean }).isLine) o.visible = false;
@@ -969,6 +970,7 @@ export class Game {
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
+  private puppet = 0;
 
   /** The spider spins an egg sac into the web, just above where it hangs. */
   private laySac() {
@@ -1069,6 +1071,14 @@ export class Game {
     const reach = (this.ceilY - s.y) / dir.y;
     const dthick = CFG.baseThick * (0.9 + this.grow01 * 0.8);
     if (this.phase !== 'placing') this.silk.push(s.x, s.y, s.z, s.x + dir.x * reach, s.y + dir.y * reach, s.z + dir.z * reach, dthick, 1, DRAG + 0.3, 1, 0);
+    // the marionette thread: while you learn, a faint line runs from your fingertips to the spider
+    const learning = this.phase === 'swing' || this.phase === 'frame' || this.phase === 'spin';
+    this.puppet += ((learning && this.active?.seen && !this.desktop ? 1 : 0) - this.puppet) * (1 - Math.exp(-dt * 2));
+    if (this.puppet > 0.02 && this.active) {
+      const f = this.handLocal({ ...this.active, pos: this.active.pinch }, this.v1);
+      const top = this.spider.local(this.spider.spinneret, this.v2);
+      this.silk.push(f.x, f.y, f.z, top.x, top.y, top.z, 0.00025, 1, RADIAL + 0.2, this.puppet * 0.55, 0);
+    }
     pushBeads(w, this.drops, 1 + this.grow01 * 0.4);
     this.drips.update(dt, this.floorY, (x, y, z, r) => this.drops.push(x, y, z, r));
     this.colonyWet = this.rainI > 0.05 ? Math.min(1, this.colonyWet + dt * 0.03) : Math.max(0, this.colonyWet - dt * 0.005);
