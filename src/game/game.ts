@@ -112,7 +112,7 @@ export class Game {
   private frameR = 0.27;
 
   // spinning
-  private live: { start: number; last: number; head: number; c: number; ids: number[]; cs: number[]; len: number } | null = null;
+  private live: { start: number; last: number; head: number; c: number; ids: number[]; cs: number[]; len: number; at: number; tap: boolean; lost: number } | null = null;
   private threadsDone = 0;
   private attachTarget = -1;
 
@@ -283,8 +283,9 @@ export class Game {
       this.spider.wave = 1;
     }
     if (p === 'frame') {
-      this.wantScan = true;
+      this.spider.wave = 1;
       if (this.desktop) this.buildFrame();
+      else this.wantScan = true;
     }
     if (p === 'firstfly') this.spawnFly(true);
     if (p === 'free') {
@@ -420,7 +421,13 @@ export class Game {
     this.root.updateMatrixWorld(true);
     this.toLocal.copy(this.root.matrixWorld).invert();
     const floorLocal = -this.root.position.y;
-    const room = scanRoom(frame, this.ref, this.toLocal.clone().multiply(this.world.player.matrixWorld), floorLocal);
+    let room;
+    try {
+      room = scanRoom(frame, this.ref, this.toLocal.clone().multiply(this.world.player.matrixWorld), floorLocal);
+    } catch (e) {
+      console.warn('[gossamer] room scan failed, using the floor', e);
+      room = scanRoom(null, null, this.toLocal, floorLocal);
+    }
     if (!this.framed) {
       this.ceilY = room.ceilY;
       this.floorY = room.floorY;
@@ -434,7 +441,7 @@ export class Game {
   /** The frame: lines tied to your room, and a ring the player spins across. */
   private buildFrame() {
     if (this.framed) return;
-    if (!this.anchors.length) this.scan(this.frame);
+    if (!this.anchors.length) this.scan(null);
     this.framed = true;
     const w = this.web;
     const R0 = this.frameR;
@@ -495,6 +502,16 @@ export class Game {
   // ---------------------------------------------------------------- per frame
 
   update(dtRaw: number) {
+    try {
+      this.step(dtRaw);
+    } catch (e) {
+      if (!this.errored) console.error('[gossamer]', e);
+      this.errored = true;
+    }
+  }
+  private errored = false;
+
+  private step(dtRaw: number) {
     if (this.phase === 'idle' || this.paused) return;
     const dt = Math.min(dtRaw, 1 / 30);
     this.clock += dt;
@@ -640,21 +657,28 @@ export class Game {
     this.spider.pose(S, up, this.camLocal.clone().sub(S), this.twist, vel, dt);
   }
 
+  /**
+   * Spinning. A tap starts a thread at the spider; swing, and the next tap ties it off. Holding the pinch
+   * works too: letting go ties it off. Every pinch does something you can see and hear.
+   */
   private spin(dt: number) {
-    const canSpin = this.framed && ['spin', 'firstfly', 'eat', 'free'].includes(this.phase);
+    const canSpin = this.framed && this.controls && ['frame', 'spin', 'firstfly', 'eat', 'free'].includes(this.phase);
     const h = this.active;
     const w = this.web;
     const s = this.spider.local(this.spider.spinneret, this.v1);
     const thick = CFG.baseThick + (CFG.maxThick - CFG.baseThick) * this.grow01;
-    const snapR = CFG.snapRadius * (0.8 + this.spider.size * 0.2);
+    const reach = CFG.attachReach * (0.85 + this.spider.size * 0.15);
 
+    if (h?.down && !canSpin && this.controls) this.audio.pluck(note(5), 0.03, this.wpos(s), 0.4);
     if (canSpin && h?.down && !this.live) {
-      let start = w.nearestP(s.x, s.y, s.z, snapR);
+      let start = w.nearestP(s.x, s.y, s.z, reach);
       if (start < 0) start = w.addP(s.x, s.y, s.z, 1);
       const head = w.addP(s.x, s.y, s.z, 0);
       const c = w.addC(start, head, RADIAL, thick, 1);
-      this.live = { start, last: start, head, c, ids: [start], cs: [c], len: 0 };
-      this.audio.pluck(note(7), 0.05, this.wpos(s), 0.5);
+      this.live = { start, last: start, head, c, ids: [start], cs: [c], len: 0, at: this.clock, tap: false, lost: 0 };
+      this.audio.pluck(note(7), 0.09, this.wpos(s), 0.8);
+      w.glint[c] = 1;
+      return;
     }
     const L = this.live;
     this.laying = Math.max(0, this.laying - dt);
@@ -683,9 +707,17 @@ export class Game {
     }
     this.audio.spinHiss(this.v2.copy(this.S).sub(this.Sprev).length() / Math.max(dt, 1e-3) * 1.5);
     const skip = new Set([...L.ids, L.head]);
-    this.attachTarget = w.nearestP(s.x, s.y, s.z, snapR, skip);
+    this.attachTarget = w.nearestP(s.x, s.y, s.z, reach, skip);
+    if (this.attachTarget === L.start) this.attachTarget = -1;
+
+    // a quick pinch-and-release is a tap: keep spinning until the next tap
+    if (h?.up && !L.tap) {
+      if (this.clock - L.at < 0.4) L.tap = true;
+      else return this.release(skip);
+    } else if (h?.down && L.tap) return this.release(skip);
+    L.lost = h?.seen ? 0 : L.lost + dt;
     const tooLong = L.len + d > CFG.maxThread * (0.8 + this.spider.size * 0.3);
-    if (h?.up || !h?.seen || tooLong) this.release(skip);
+    if (tooLong || L.lost > 1.5) this.release(skip);
   }
 
   private release(skip: Set<number>) {
@@ -805,7 +837,7 @@ export class Game {
     const fwdW = this.v1.copy(this.root.position).sub(this.head).normalize();
     (dim.uniforms.uFwd.value as Vector3).copy(fwdW);
     const amt = dim.uniforms.uAmount as { value: number };
-    const target = (this.phase === 'intro' ? smooth(0, 3 * fast, t) : 1) * (0.62 + this.rainI * 0.12);
+    const target = (this.phase === 'intro' ? smooth(0, 2 * fast, t) : 1) * (0.62 + this.rainI * 0.12);
     amt.value += (target - amt.value) * (1 - Math.exp(-dt * 2));
 
     this.spider.wave = Math.max(0, this.spider.wave - dt * 0.45);
@@ -813,8 +845,8 @@ export class Game {
     if (this.phase === 'intro') {
       const ret = this.returning;
       // no words: the room darkens, something glints at the ceiling, and it comes down
-      const G0 = ret ? 1 : 3.5 * fast; // glint
-      const D0 = ret ? 2.5 : 5 * fast, D1 = D0 + (ret ? 5.5 : 10 * fast); // descent
+      const G0 = ret ? 1 : 1.6 * fast; // glint
+      const D0 = ret ? 2 : 2.6 * fast, D1 = D0 + (ret ? 4.5 : 7 * fast); // descent
       // the glint: something catches the light up at the ceiling
       this.star.visible = t > G0 && t < D0 + 3;
       this.star.position.set(0, this.ceilY - 0.02, 0);
@@ -833,7 +865,7 @@ export class Game {
       this.spider.unfold = smooth(D1 - 1.2, D1 + 0.8, t);
       if (t >= D1 + 0.8) {
         this.arrive();
-        this.go(this.returning ? 'free' : 'swing');
+        this.go(this.returning ? 'free' : 'frame');
         if (this.returning && this.brood.pendingSacs()) this.later.push({ t: this.clock + 2.5, fn: () => this.brood.hatchAll() });
       }
       return;
@@ -842,18 +874,18 @@ export class Game {
 
     // the hint light: a small soft point that shows where your hand goes
     let hintOn = false;
-    if (this.phase === 'swing') {
+    if (this.phase === 'spin' || this.phase === 'frame') {
       const h = this.active;
-      const idle = !h || !h.seen || t > 6;
-      if (idle && !this.desktop) {
+      const idle = !h || !h.seen;
+      if (idle && !this.desktop && t > 3) {
         hintOn = true;
         const s = Math.sin(this.clock * 1.6);
         this.hint.position.set(s * 0.2, -0.1, 0.42);
         this.hint.scale.setScalar(0.035);
       }
-      if (this.travel > 1.6 && t > 4) this.go('frame');
     }
-    if (this.phase === 'frame' && t > 4.2) this.go('spin');
+    if (this.phase === 'frame' && t > 0.6 && !this.framed) this.buildFrame(); // if the room never answered
+    if (this.phase === 'frame' && t > 2.5) this.go('spin');
     if (this.phase === 'spin') {
       if (this.threadsDone === 0 && t > 3 && !this.live) {
         // breathe the nearest ring point so you see where silk can start
@@ -865,7 +897,7 @@ export class Game {
           this.hint.scale.setScalar(0.02 + Math.sin(this.clock * 4) * 0.008);
         }
       }
-      if ((this.threadsDone >= 3 || this.web.totalLength(CAPTURE) > 0.6) && t > 2 && !this.live) this.go('firstfly');
+      if (((this.threadsDone >= 2 || this.web.totalLength(CAPTURE) > 0.4) && t > 2 && !this.live) || t > 25) this.go('firstfly');
     }
     if (this.phase === 'firstfly' && t > 28 && !this.swarm.flies.some((f) => f.state === 'stuck')) {
       this.spawnFly(true);
@@ -977,7 +1009,6 @@ export class Game {
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
-  private puppet = 0;
   private scanClock = 3;
 
   /** The spider spins an egg sac into the web, just above where it hangs. */
@@ -1079,14 +1110,6 @@ export class Game {
     const reach = (this.ceilY - s.y) / dir.y;
     const dthick = CFG.baseThick * (0.9 + this.grow01 * 0.8);
     if (this.phase !== 'placing') this.silk.push(s.x, s.y, s.z, s.x + dir.x * reach, s.y + dir.y * reach, s.z + dir.z * reach, dthick, 1, DRAG + 0.3, 1, 0);
-    // the marionette thread: while you learn, a faint line runs from your fingertips to the spider
-    const learning = this.phase === 'swing' || this.phase === 'frame' || this.phase === 'spin';
-    this.puppet += ((learning && this.active?.seen && !this.desktop ? 1 : 0) - this.puppet) * (1 - Math.exp(-dt * 2));
-    if (this.puppet > 0.02 && this.active) {
-      const f = this.handLocal({ ...this.active, pos: this.active.pinch }, this.v1);
-      const top = this.spider.local(this.spider.spinneret, this.v2);
-      this.silk.push(f.x, f.y, f.z, top.x, top.y, top.z, 0.00025, 1, RADIAL + 0.2, this.puppet * 0.55, 0);
-    }
     pushBeads(w, this.drops, 1 + this.grow01 * 0.4);
     this.drips.update(dt, this.floorY, (x, y, z, r) => this.drops.push(x, y, z, r));
     this.colonyWet = this.rainI > 0.05 ? Math.min(1, this.colonyWet + dt * 0.03) : Math.max(0, this.colonyWet - dt * 0.005);

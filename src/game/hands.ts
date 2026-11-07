@@ -40,6 +40,18 @@ export class Hands {
   private o = new Object3D();
   private tmpA = new Vector3();
   private tmpB = new Vector3();
+  // the headset's own pinch (WebXR select events): the most reliable signal there is
+  private selecting = new Map<XRInputSource, boolean>();
+  private session: XRSession | null = null;
+
+  private listen(session: XRSession) {
+    if (this.session === session) return;
+    this.session = session;
+    this.selecting.clear();
+    session.addEventListener('selectstart', (e) => this.selecting.set((e as XRInputSourceEvent).inputSource, true));
+    session.addEventListener('selectend', (e) => this.selecting.set((e as XRInputSourceEvent).inputSource, false));
+    session.addEventListener('inputsourceschange', () => this.selecting.clear());
+  }
 
   constructor() {
     const mat = new MeshBasicMaterial({ color: new Color(0, 0, 0) });
@@ -52,6 +64,7 @@ export class Hands {
 
   /** Read hands from the XR frame. Poses come out in the reference space (which is our world frame). */
   readXR(frame: XRFrame, ref: XRReferenceSpace, now: number) {
+    this.listen(frame.session);
     const sources = frame.session.inputSources;
     let inst = 0;
     for (const h of [this.left, this.right]) {
@@ -71,10 +84,12 @@ export class Hands {
         at(J.middleMeta, h.pos).lerp(at(J.middleProx, this.tmpA), 0.6);
         const tt = at(J.thumbTip, this.tmpA);
         const it = at(J.indexTip, this.tmpB);
-        h.gap = tt.distanceTo(it);
+        // joint positions are the centres of the fingertips: subtract their radii to get the real gap
+        h.gap = tt.distanceTo(it) - this.radii[J.thumbTip] - this.radii[J.indexTip];
         h.pinch.copy(tt).add(it).multiplyScalar(0.5);
         const was = h.pinching;
-        h.pinching = was ? h.gap < 0.034 : h.gap < 0.017;
+        const sel = this.selecting.get(src);
+        h.pinching = sel === true || (was ? h.gap < 0.022 : h.gap < 0.007);
         h.down = h.pinching && !was;
         h.up = !h.pinching && was;
         h.seen = true;
@@ -104,7 +119,7 @@ export class Hands {
         const p = pose.transform.position;
         h.pos.set(p.x, p.y, p.z);
         h.pinch.copy(h.pos);
-        const pressed = !!src.gamepad?.buttons[0]?.pressed;
+        const pressed = this.selecting.get(src) === true || !!src.gamepad?.buttons[0]?.pressed;
         const was = h.pinching;
         h.pinching = pressed;
         h.down = pressed && !was;

@@ -39,6 +39,7 @@ export const CFG = {
   spacing: 0.028, // particle spacing along spun threads (also the capture spiral's pitch)
   tension: 0.965, // threads shrink to this fraction when tied off, so they hang taut
   snapRadius: 0.085,
+  attachReach: 0.26, // a thread always ties to the nearest silk within this reach
   maxThread: 1.0,
   baseThick: 0.00042, // radius of a dry thread at the start
   maxThick: 0.0011,
