@@ -1,5 +1,5 @@
 {
-  "name": "nxt-spider-web",
+  "name": "gossamer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,8 @@
     "reference:warmup": "iwsdk reference warmup",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "./deploy.sh"
   },
   "dependencies": {
     "@iwsdk/core": "1.1.0-rc.2",
