@@ -888,6 +888,13 @@ export class Game {
     (this.hint.material as unknown as { uniforms: { uOpacity: { value: number } } }).uniforms.uOpacity.value = 0.6 + Math.sin(this.clock * 3) * 0.25;
 
     if (this.phase === 'free') {
+      // the headset can deliver room data late: look again now and then, for nesting sites
+      this.scanClock -= dt;
+      if (this.scanClock <= 0) {
+        this.scanClock = 30;
+        if (this.desktop) this.scan(null);
+        else this.wantScan = true;
+      }
       this.flyClock -= dt;
       const maxFlies = Math.min(6, 2 + Math.floor(this.eaten / 4));
       if (this.flyClock <= 0) {
@@ -971,6 +978,7 @@ export class Game {
   }
   private afterglow = 0;
   private puppet = 0;
+  private scanClock = 3;
 
   /** The spider spins an egg sac into the web, just above where it hangs. */
   private laySac() {
