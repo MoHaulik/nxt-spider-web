@@ -38,6 +38,7 @@ type Save = {
   colonies?: ColonySave[];
   sacs?: SacSave[];
   parcels?: number;
+  gravid?: number;
   savedAt: number;
   born?: number;
 };
@@ -262,7 +263,7 @@ export class Game {
   }
 
   toggleRain() {
-    this.raining = this.raining > 0 ? 0 : CFG.rainLength;
+    this.raining = this.raining > 0 ? 0.01 : CFG.rainLength; // ending it lets the sun come back
   }
 
   skip() {
@@ -389,6 +390,7 @@ export class Game {
       const hours = (Date.now() - this.save.savedAt) / 3.6e6;
       this.web.restore(this.save.web, Math.max(0.4, 1 - hours * 0.08));
       this.food = this.save.food;
+      this.gravid = this.save.gravid ?? 0;
       this.eaten = this.save.eaten;
       this.ceilY = this.save.ceilY;
       this.floorY = this.save.floorY;
@@ -396,6 +398,8 @@ export class Game {
       this.framed = true;
       this.spider.size = this.sizeFor(this.food);
       this.awayFor(hours);
+      this.reserve = this.silkCap;
+      if (this.gravid >= 1) this.chooseNest();
     } else {
       this.floorY = -this.root.position.y;
       this.web.floorY = this.floorY;
@@ -483,7 +487,7 @@ export class Game {
     if (this.phase === 'idle' || this.phase === 'placing' || this.phase === 'intro' && !this.returning) return;
     try {
       const s: Save = { web: this.web.serialize(), food: this.food, eaten: this.eaten, ceilY: this.ceilY, floorY: this.floorY, anchorId: this.anchorId, savedAt: Date.now(), born: this.save?.born ?? Date.now(),
-        ...this.brood.save(), parcels: this.swarm.flies.filter((f) => f.wrapped).length };
+        ...this.brood.save(), gravid: this.gravid, parcels: this.swarm.flies.filter((f) => f.wrapped).length };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
       this.save = s;
     } catch {}
@@ -548,6 +552,11 @@ export class Game {
     for (let k = 0; k < n; k++) this.web.step(sdt / n);
     this.swarm.update(sdt, this.clock, this.web, this.bounds);
     this.feed(dt);
+    this.economy(dt);
+    this.laySpiral(sdt);
+    this.nesting(sdt);
+    this.touch(dt);
+    this.colonyFlies();
     this.weather(dt);
     this.draw(dt);
     this.sound();
@@ -608,9 +617,22 @@ export class Game {
     const g01 = this.grow01;
     if (this.controls) {
       const h = this.active;
+      let hl: Vector3 | null = null;
       if (h && h.seen) {
-        const hl = this.handLocal(h, this.v1);
-        if (this.needNeutral || this.clock - h.lastSeen > 0.5) {
+        hl = this.handLocal(h, this.v1);
+        const sp = hl.distanceTo(this.lastHand) / Math.max(dt, 1e-3);
+        this.lastHand.copy(hl);
+        this.handMotion += (Math.min(sp, 2) - this.handMotion) * (1 - Math.exp(-dt * 4));
+      }
+      this.stillT = !hl || this.handMotion < 0.035 ? this.stillT + dt : 0;
+      const goal = this.autoTarget();
+      this.auto = !!goal && this.stillT > CFG.idleTakeover;
+      if (this.auto && goal) {
+        // your hand rests: the spider goes about its own business, calmly
+        T.lerp(goal, 1 - Math.exp(-dt * 1.4));
+        this.needNeutral = true;
+      } else if (hl) {
+        if (this.needNeutral || this.clock - h!.lastSeen > 0.5) {
           this.neutral.set(hl.x - T.x / CFG.gainX, hl.y - T.y / CFG.gainY, hl.z);
           this.needNeutral = false;
         }
@@ -626,8 +648,6 @@ export class Game {
           T.y *= b / r;
         }
         T.y = Math.max(T.y, this.floorY + 0.25);
-        this.travel += Math.abs(T.x - this.lastTx);
-        this.lastTx = T.x;
       } else this.needNeutral = true;
 
       const L = CFG.pendulum;
@@ -671,6 +691,19 @@ export class Game {
 
     if (h?.down && !canSpin && this.controls) this.audio.pluck(note(5), 0.03, this.wpos(s), 0.4);
     if (canSpin && h?.down && !this.live) {
+      // at a caught fly, a tap is a turn of silk around it
+      const prey = this.preyNear();
+      if (prey && !prey.wrapped) {
+        prey.setWrap(prey.wrapT + 0.3);
+        this.reserve = Math.max(0, this.reserve - 0.03);
+        this.audio.pluck(note(9 + Math.floor(prey.wrapT * 5)), 0.05, this.wpos(prey.p), 0.6);
+        return;
+      }
+      if (this.reserve < 0.06) {
+        // nothing left to spin: a dry little sound, and the abdomen shows why
+        this.audio.pluck(note(0), 0.025, this.wpos(s), 0.25);
+        return;
+      }
       let start = w.nearestP(s.x, s.y, s.z, reach);
       if (start < 0) start = w.addP(s.x, s.y, s.z, 1);
       const head = w.addP(s.x, s.y, s.z, 0);
@@ -704,6 +737,11 @@ export class Game {
       L.head = w.addP(s.x, s.y, s.z, 0);
       L.c = w.addC(L.last, L.head, RADIAL, thick, 1);
       L.cs.push(L.c);
+      this.reserve -= d;
+      if (this.reserve <= 0) {
+        this.reserve = 0;
+        return this.release(new Set([...L.ids, L.head]));
+      }
     }
     this.audio.spinHiss(this.v2.copy(this.S).sub(this.Sprev).length() / Math.max(dt, 1e-3) * 1.5);
     const skip = new Set([...L.ids, L.head]);
@@ -820,12 +858,31 @@ export class Game {
     }
     // lay them from the outside in, as a spider does
     rungs.sort((a, b) => rad(b[0]) - rad(a[0]));
+    this.rungQueue.push(...rungs);
+  }
+
+  /** One turn of sticky spiral at a time, paid for from the silk reserve; it waits when the spider is spent. */
+  private laySpiral(dt: number) {
+    this.rungClock -= dt;
+    if (this.rungClock > 0 || !this.rungQueue.length) return;
+    const w = this.web, p = w.p;
+    const [i, j] = this.rungQueue[0];
+    if (!w.pAlive[i] || !w.pAlive[j] || !w.anchored[i] || !w.anchored[j]) {
+      this.rungQueue.shift();
+      return;
+    }
+    const cost = w.dist(i, j) * CFG.captureCost;
+    if (this.reserve < cost) {
+      this.rungClock = 0.6;
+      return;
+    }
+    this.rungQueue.shift();
+    this.reserve -= cost;
     const thick = (CFG.baseThick + (CFG.maxThick - CFG.baseThick) * this.grow01) * 0.85;
-    rungs.forEach(([i, j], k) => {
-      const delay = 0.35 + k * 0.07;
-      w.addC(i, j, CAPTURE, thick, 0.985, delay);
-      if (k % 2 === 0) this.later.push({ t: this.clock + delay, fn: () => this.audio.pluck(note(14 - (k % 9)), 0.025, this.wpos({ x: p[i * 3], y: p[i * 3 + 1], z: p[i * 3 + 2] }), 0.9) });
-    });
+    w.addC(i, j, CAPTURE, thick, 0.985, 0);
+    this.rungClock = CFG.rungEvery;
+    this.rungNote = (this.rungNote + 1) % 9;
+    this.audio.pluck(note(14 - this.rungNote), 0.022, this.wpos({ x: p[i * 3], y: p[i * 3 + 1], z: p[i * 3 + 2] }), 0.9);
   }
 
   // ---------------------------------------------------------------- the beats
@@ -927,12 +984,14 @@ export class Game {
         if (this.desktop) this.scan(null);
         else this.wantScan = true;
       }
+      // flies come for the glints: few at first, more as the web and the spider mature; none in rain
       this.flyClock -= dt;
-      const maxFlies = Math.min(6, 2 + Math.floor(this.eaten / 4));
-      if (this.flyClock <= 0) {
-        this.flyClock = rand(...CFG.flyInterval) / (1 + Math.min(1.5, this.web.totalLength(CAPTURE) * 0.25));
+      const maxFlies = this.eaten < 3 ? 1 : this.eaten < 8 ? 2 : 3;
+      if (this.flyClock <= 0 && this.rainI < 0.3) {
+        this.flyClock = rand(...CFG.flyInterval) / (1 + Math.min(1, this.web.totalLength(CAPTURE) * 0.12));
         if (this.swarm.alive() < maxFlies) this.spawnFly(false, this.eaten >= 5 && Math.random() < 0.08);
       }
+      if (this.rainI > 0.4) for (const f of this.swarm.flies) if (f.state === 'fly') f.leaving = true;
       if (this.clock - this.lastMeal > 60) this.food = Math.max(0, this.food - dt * CFG.hunger * 10);
     }
   }
@@ -954,24 +1013,65 @@ export class Game {
   }
 
   private onStick(f: Fly) {
-    this.audio.pluck(note(4), 0.14, this.wpos(f.p), 1.8);
+    this.audio.thrum(this.wpos(f.p));
     if (this.phase === 'firstfly') this.go('eat');
   }
 
-  private feed(dt: number) {
-    const mouth = this.spider.local(this.spider.mouth, this.v1);
-    let near = false;
+  /** A caught fly within the spider's reach, if any. */
+  private preyNear(): Fly | null {
+    const mouth = this.spider.local(this.spider.mouth, this.v3);
     const r = CFG.eatRadius * (0.7 + this.spider.size * 0.3);
+    let best: Fly | null = null, bd = r;
     for (const f of this.swarm.flies) {
       if (f.state !== 'stuck') continue;
       const d = Math.min(f.p.distanceTo(this.S), f.p.distanceTo(mouth));
-      if (d < r) {
-        near = true;
-        f.eatT += dt;
-        f.escape += dt; // held, it cannot tear free
-        if (f.eatT > CFG.eatHold) this.eat(f);
-      } else f.eatT = Math.max(0, f.eatT - dt);
+      if (d < bd) {
+        bd = d;
+        best = f;
+      }
     }
+    return best;
+  }
+
+  /** What the spider does by itself when your hand rests: lay eggs, take prey, eat its store, look into a pluck. */
+  private autoTarget(): Vector3 | null {
+    const lift = (v: Vector3) => this.autoGoal.copy(v).add(this.v2.set(0, 0.46 * this.spider.scaleM, 0));
+    if (this.gravid >= 1 && this.nest >= 0 && this.web.pAlive[this.nest]) {
+      const p = this.web.p;
+      return this.autoGoal.set(p[this.nest * 3], p[this.nest * 3 + 1] - 0.03, p[this.nest * 3 + 2]);
+    }
+    let prey: Fly | null = null, bd = Infinity;
+    for (const f of this.swarm.flies) {
+      if (f.state !== 'stuck') continue;
+      const d = f.p.distanceTo(this.S) + (f.wrapped ? 0.3 : 0); // fresh prey first; the larder can wait
+      if (d < bd) {
+        bd = d;
+        prey = f;
+      }
+    }
+    if (prey) return lift(prey.p);
+    if (this.attention && this.clock - this.attention.t < 3) return this.autoGoal.copy(this.attention.p);
+    return null;
+  }
+
+  private feed(dt: number) {
+    let near = false;
+    const f = this.preyNear();
+    if (f) {
+      near = true;
+      f.escape += dt; // held, it cannot tear free
+      if (!f.wrapped) {
+        // binding it: turn after turn of silk
+        const before = f.wrapT;
+        f.setWrap(f.wrapT + dt / CFG.wrapTime);
+        this.reserve = Math.max(0, this.reserve - dt * 0.04);
+        if (Math.floor(before * 6) !== Math.floor(f.wrapT * 6)) this.audio.pluck(note(9 + Math.floor(f.wrapT * 5)), 0.03, this.wpos(f.p), 0.5);
+      } else {
+        f.eatT += dt;
+        if (f.eatT > 1.2) this.eat(f);
+      }
+    }
+    for (const g of this.swarm.flies) if (g !== f) g.eatT = Math.max(0, g.eatT - dt);
     this.spider.eating += ((near || this.eatingList.length ? 1 : 0) - this.spider.eating) * (1 - Math.exp(-dt * 6));
     for (const e of this.eatingList) {
       e.t += dt;
@@ -1004,24 +1104,154 @@ export class Game {
       this.audio.chord([5, 9, 12, 14], 0.08, 6, 0.9);
     }
     this.web.glint.fill(0.6);
-    if (this.eaten % 6 === 0) this.later.push({ t: this.clock + 1.3, fn: () => this.laySac() });
+    this.reserve = Math.min(this.silkCap, this.reserve + 0.6);
+    if (this.brood.pendingSacs() === 0 && this.gravid < 1) {
+      this.gravid = Math.min(1, this.gravid + 1 / CFG.mealsPerSac);
+      if (this.gravid >= 1) this.chooseNest();
+    }
     this.persist();
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
+
+  private get silkCap() {
+    return Math.min(CFG.silkMax, CFG.silkBase + CFG.silkPerFood * this.food);
+  }
+
+  /** Silk comes back slowly, faster when the spider has eaten recently; the abdomen shows the reserve. */
+  private economy(dt: number) {
+    const fed = this.clock - this.lastMeal < 90 && this.eaten > 0 ? 1.6 : 0.7;
+    this.reserve = Math.min(this.silkCap, this.reserve + dt * CFG.silkRegen * fed);
+    const k = 1 - Math.exp(-dt * 2);
+    this.spider.fullness += (this.reserve / this.silkCap - this.spider.fullness) * k;
+    this.spider.gravid += (this.gravid - this.spider.gravid) * k;
+    // the spider's weight bends the silk it hangs against
+    const w = this.web;
+    const i = w.nearestP(this.S.x, this.S.y, this.S.z, 0.035);
+    if (i >= 0 && w.im[i] !== 0) w.p[i * 3 + 1] -= 0.00004 * this.spider.size;
+  }
+
+  /** Your fingertip on a thread plucks it: it rings, sways, and the spider turns to look. */
+  private touch(dt: number) {
+    this.pluckCool -= dt;
+    if (this.desktop) return;
+    for (const h of [this.hands.left, this.hands.right]) {
+      if (!h.seen) continue;
+      const tip = this.v1.copy(h.tip).applyMatrix4(this.world.player.matrixWorld).applyMatrix4(this.toLocal);
+      const last = h === this.hands.left ? this.tipL : this.tipR;
+      const vel = this.v2.copy(tip).sub(last).divideScalar(Math.max(dt, 1e-3));
+      last.copy(tip);
+      if (this.pluckCool > 0 || vel.length() < 0.06 || Math.abs(tip.z) > 0.05) continue;
+      const hit = this.web.nearestC(tip.x, tip.y, tip.z, 0.012);
+      if (!hit) continue;
+      const k = Math.min(0.012, vel.length() * 0.01);
+      vel.normalize();
+      this.web.impulse(hit.c, hit.t, vel.x * k, vel.y * k, vel.z * k * 1.5);
+      this.web.glint[hit.c] = 1;
+      const pitch = 3 + Math.floor(clamp(this.web.base[hit.c] * 40, 0, 9));
+      this.audio.pluck(note(pitch), 0.08, this.wpos(tip), 2);
+      this.attention = { p: tip.clone(), t: this.clock };
+      // the spider startles toward it
+      this.Sprev.addScaledVector(this.v3.copy(tip).sub(this.S).normalize(), -0.003);
+      this.pluckCool = 0.15;
+    }
+  }
+
+  /** Flies that slip past the big web may blunder into a spiderling family's web instead. */
+  private colonyFlies() {
+    const cs = this.brood.colonies;
+    for (const f of this.swarm.flies) {
+      if (f.state !== 'fly') continue;
+      if (f.leaving && !this.colonyBound.has(f) && cs.length) {
+        this.colonyBound.set(f, Math.random() < 0.55 ? cs[Math.floor(Math.random() * cs.length)] : null);
+      }
+      const c = this.colonyBound.get(f);
+      if (!c) continue;
+      f.target.copy(c.spots[0]);
+      f.retarget = 99;
+      f.commit = true;
+      if (f.p.distanceTo(c.spots[0]) < 0.04) {
+        f.state = 'gone';
+        this.brood.feedColony(c);
+        this.audio.pluck(note(17), 0.02, this.wpos(f.p), 0.6);
+      }
+    }
+  }
+  private colonyBound = new Map<Fly, ReturnType<Brood['found']> | null>();
+  private reserve = CFG.silkBase;
+  private rungQueue: [number, number][] = [];
+  private rungClock = 0;
+  private rungNote = 0;
+  private gravid = 0;
+  private gravidT = 0;
+  private nest = -1;
+  private layingSac = 0;
+  private handMotion = 0;
+  private stillT = 0;
+  private auto = false;
+  private lastHand = new Vector3();
+  private autoGoal = new Vector3();
+  private attention: { p: Vector3; t: number } | null = null;
+  private pluckCool = 0;
+  private tipL = new Vector3();
+  private tipR = new Vector3();
   private scanClock = 3;
 
-  /** The spider spins an egg sac into the web, just above where it hangs. */
+  /** Heavy with eggs, the spider picks a sheltered place: the highest strong junction of the frame. */
+  private chooseNest() {
+    const w = this.web, p = w.p;
+    let best = -1, by = -Infinity;
+    for (let i = 0; i < w.nP; i++) {
+      if (!w.pAlive[i] || !w.anchored[i] || w.im[i] === 0 || w.deg[i] < 3) continue;
+      const r = Math.hypot(p[i * 3], p[i * 3 + 1]);
+      if (r < this.frameR * 0.6 || r > this.frameR * 1.3) continue;
+      if (p[i * 3 + 1] > by) {
+        by = p[i * 3 + 1];
+        best = i;
+      }
+    }
+    this.nest = best;
+    this.gravidT = 0;
+  }
+
+  /** Carrying eggs: go to the nest (by itself when your hand rests) and spin the sac there, slowly. */
+  private nesting(dt: number) {
+    if (this.gravid < 1 || this.layingSac) {
+      if (this.layingSac) {
+        this.layingSac -= dt;
+        this.laying = Math.max(this.laying, 0.2);
+        this.gravid = Math.max(0, this.gravid - dt / 6);
+        if (this.layingSac <= 0) {
+          this.layingSac = 0;
+          this.gravid = 0;
+          this.audio.chord([0, 4, 7, 12], 0.05, 5);
+          this.persist();
+        }
+      }
+      return;
+    }
+    this.gravidT += dt;
+    const w = this.web, p = w.p;
+    if (this.nest < 0 || !w.pAlive[this.nest]) this.chooseNest();
+    let at = -1;
+    if (this.nest >= 0) {
+      const d = Math.hypot(p[this.nest * 3] - this.S.x, p[this.nest * 3 + 1] - this.S.y);
+      if (d < 0.07) at = this.nest;
+    }
+    // if you keep it busy for a long time, it lays where it is
+    if (at < 0 && this.gravidT > 45) at = w.nearestP(this.S.x, this.S.y, this.S.z, 0.2);
+    if (at < 0) return;
+    this.layingSac = 6;
+    this.brood.lay(new Vector3(p[at * 3], p[at * 3 + 1] - 0.011, p[at * 3 + 2]), at, 0, 0.02);
+    this.audio.chord([0, 2, 7], 0.04, 6);
+    this.audio.pluck(note(9), 0.05, this.wpos(this.S), 2.5);
+    // weather follows its own course, but a waiting sac draws the next rain a little nearer
+    this.rainClock = Math.min(this.rainClock, FLAGS.fast ? 12 : 90);
+  }
+
   private laySac() {
-    const s = this.spider.local(this.spider.spinneret, this.v1);
-    const i = this.web.nearestP(s.x, s.y, s.z, 0.2);
-    if (i < 0) return;
-    this.laying = 2.2;
-    const p = this.web.p;
-    this.brood.lay(new Vector3(p[i * 3], p[i * 3 + 1] - 0.011, p[i * 3 + 2]), i);
-    this.audio.chord([0, 2, 7], 0.05, 4);
-    this.audio.pluck(note(9), 0.06, this.wpos(s), 2);
-    this.persist();
+    this.gravid = 1;
+    this.chooseNest();
   }
 
   /** What happened while you were gone: meals wrapped and stored, some silk fallen, the families grown. */
@@ -1056,7 +1286,10 @@ export class Game {
     }
     if (this.raining > 0) {
       this.raining -= dt;
-      if (this.raining <= 0) this.afterglow = 1; // the sun comes back onto a soaked web
+      if (this.raining <= 0) {
+        this.afterglow = 1; // the sun comes back onto a soaked web
+        this.flyClock = 5; // and the insects come out again
+      }
     }
     this.afterglow = Math.max(0, this.afterglow - dt / 30);
     const want = this.raining > 0 ? smooth(0, 6, CFG.rainLength - this.raining) * smooth(0, 6, this.raining) : 0;
@@ -1114,7 +1347,7 @@ export class Game {
     this.drips.update(dt, this.floorY, (x, y, z, r) => this.drops.push(x, y, z, r));
     this.colonyWet = this.rainI > 0.05 ? Math.min(1, this.colonyWet + dt * 0.03) : Math.max(0, this.colonyWet - dt * 0.005);
     const pp = this.v3;
-    this.brood.update(dt, this.colonyWet, this.silk, this.drops, (i) => (i >= 0 && w.pAlive[i] ? pp.set(w.p[i * 3], w.p[i * 3 + 1], w.p[i * 3 + 2]) : null), FLAGS.fast ? 25 : 150);
+    this.brood.update(dt, this.colonyWet, this.silk, this.drops, (i) => (i >= 0 && w.pAlive[i] ? pp.set(w.p[i * 3], w.p[i * 3 + 1], w.p[i * 3 + 2]) : null), CFG.sacMinAge, this.afterglow > 0.25);
     this.silk.end();
     this.drops.end();
 
@@ -1145,7 +1378,7 @@ export class Game {
       }
       const pw = this.wpos(f.p);
       v.pos(...pw);
-      const lvl = f.state === 'fly' ? 0.32 : f.state === 'stuck' ? (f.burst > 0 ? 0.42 : 0.03) : 0;
+      const lvl = f.wrapped ? 0 : f.state === 'fly' ? 0.2 : f.state === 'stuck' ? (f.burst > 0 ? 0.09 * (1 - f.wrapT) : 0) : 0;
       v.level(lvl);
       const vw = this.v2.copy(f.v).applyQuaternion(this.root.quaternion);
       const toMe = this.v3.set(pw[0], pw[1], pw[2]).sub(this.head).normalize();

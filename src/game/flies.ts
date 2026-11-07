@@ -126,14 +126,29 @@ export class Fly {
     this.g.traverse((o) => ((o as Mesh).frustumCulled = false));
   }
 
-  /** Wrap it: a pale silk parcel, the way an orb-weaver stores a meal. */
+  wrapT = 0; // 0..1 as the spider binds it in silk
+  toColony: Vector3 | null = null; // flying off toward a spiderling family's web
+  private parcelMesh: Mesh | null = null;
+
+  /** Bind it in silk, a turn at a time: a parcel grows over the fly until it is hidden. */
+  setWrap(k: number) {
+    this.wrapT = Math.min(1, k);
+    if (!this.parcelMesh) {
+      this.parcelMesh = new Mesh(this.s.sphere, this.s.parcel);
+      this.g.add(this.parcelMesh);
+    }
+    const e = Math.min(1, this.wrapT * 1.15);
+    this.parcelMesh.scale.set(0.12 + 0.2 * e, 0.12 + 0.2 * e, 0.2 + 0.38 * e);
+    for (const c of this.g.children) if (c !== this.parcelMesh) c.visible = this.wrapT < 0.8;
+    if (this.wrapT >= 1) {
+      this.wrapped = true;
+      this.heading.set(0, -1, 0.2).normalize();
+    }
+  }
+
+  /** Wrap it at once: a pale silk parcel, the way an orb-weaver stores a meal. */
   wrap() {
-    this.wrapped = true;
-    for (const c of this.g.children) c.visible = false;
-    const m = new Mesh(this.s.sphere, this.s.parcel);
-    m.scale.set(0.3, 0.3, 0.55);
-    this.g.add(m);
-    this.heading.set(0, -1, 0.2).normalize();
+    this.setWrap(1);
   }
 
   /** Visual update: orientation, wing blur, kicking legs. */

@@ -9,13 +9,14 @@ export type HandState = {
   lastSeen: number;
   pos: Vector3; // control point: the knuckles, which do not move when you pinch
   pinch: Vector3; // the pinch point itself
+  tip: Vector3; // index fingertip, for touching silk
   pinching: boolean;
   down: boolean; // pinch began this frame
   up: boolean; // pinch ended this frame
   gap: number;
 };
 
-const mk = (): HandState => ({ seen: false, lastSeen: -1, pos: new Vector3(), pinch: new Vector3(), pinching: false, down: false, up: false, gap: 1 });
+const mk = (): HandState => ({ seen: false, lastSeen: -1, pos: new Vector3(), pinch: new Vector3(), tip: new Vector3(), pinching: false, down: false, up: false, gap: 1 });
 
 // WebXR joint order
 const J = { wrist: 0, thumbTip: 4, indexMeta: 5, indexTip: 9, middleMeta: 10, middleProx: 11 };
@@ -87,6 +88,7 @@ export class Hands {
         // joint positions are the centres of the fingertips: subtract their radii to get the real gap
         h.gap = tt.distanceTo(it) - this.radii[J.thumbTip] - this.radii[J.indexTip];
         h.pinch.copy(tt).add(it).multiplyScalar(0.5);
+        h.tip.copy(it);
         const was = h.pinching;
         const sel = this.selecting.get(src);
         h.pinching = sel === true || (was ? h.gap < 0.022 : h.gap < 0.007);
@@ -119,6 +121,7 @@ export class Hands {
         const p = pose.transform.position;
         h.pos.set(p.x, p.y, p.z);
         h.pinch.copy(h.pos);
+        h.tip.set(1e3, 1e3, 1e3);
         const pressed = this.selecting.get(src) === true || !!src.gamepad?.buttons[0]?.pressed;
         const was = h.pinching;
         h.pinching = pressed;
@@ -144,6 +147,7 @@ export class Hands {
     const was = h.pinching;
     h.pos.copy(pos);
     h.pinch.copy(pos);
+    h.tip.set(1e3, 1e3, 1e3);
     h.seen = true;
     h.lastSeen = now;
     h.pinching = down;

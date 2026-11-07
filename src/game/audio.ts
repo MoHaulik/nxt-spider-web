@@ -123,6 +123,32 @@ export class Audio {
     this.pluck(f, gain, pos, 4.5);
   }
 
+  /** A fly caught: a soft, low thrum through the whole web, and one round note. */
+  thrum(pos?: [number, number, number]) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = this.now;
+    const g = this.out(pos, 0.7);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 600;
+    lp.connect(g);
+    for (const [f, a] of [[note(0, 73.42), 1], [note(0, 73.42) * 2.01, 0.35]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f * 1.04, t);
+      o.frequency.exponentialRampToValueAtTime(f, t + 0.25);
+      const e = ctx.createGain();
+      e.gain.setValueAtTime(0, t);
+      e.gain.linearRampToValueAtTime(0.09 * a, t + 0.03);
+      e.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+      o.connect(e);
+      e.connect(lp);
+      o.start(t);
+      o.stop(t + 1.9);
+    }
+    this.pluck(note(4), 0.04, pos, 2.2);
+  }
+
   /** The thread snapping. */
   snap(pos?: [number, number, number]) {
     if (!this.ctx) return;
@@ -260,8 +286,11 @@ export class Audio {
     g.gain.value = 0;
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.frequency.value = 650;
-    bp.Q.value = 0.9;
+    bp.frequency.value = 480;
+    bp.Q.value = 0.7;
+    const soft = ctx.createBiquadFilter();
+    soft.type = 'lowpass';
+    soft.frequency.value = 1500;
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
     const base = 175 + Math.random() * 40;
@@ -283,7 +312,8 @@ export class Audio {
     o2.connect(g2);
     g2.connect(vca);
     vca.connect(bp);
-    bp.connect(g);
+    bp.connect(soft);
+    soft.connect(g);
     g.connect(p);
     o.start();
     o2.start();

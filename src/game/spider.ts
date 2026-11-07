@@ -68,6 +68,8 @@ export class Spider {
   spinning = 0;
   eating = 0;
   wave = 0;
+  fullness = 1; // silk in reserve, 0..1: a plump abdomen means silk to spin
+  gravid = 0; // carrying eggs, 0..1: the abdomen swells before it lays
   private t = 0;
   private q = new Quaternion();
   private m = new Matrix4();
@@ -211,7 +213,8 @@ export class Spider {
     const speed = Math.min(1.5, vel.length() * 3);
     const t = this.t;
     const breathe = 1 + Math.sin(t * 2.1) * 0.012;
-    this.abdomen.scale.set(0.36 * breathe, 0.4, 0.33 * breathe);
+    const plump = 0.86 + 0.16 * this.fullness + 0.32 * this.gravid;
+    this.abdomen.scale.set(0.36 * breathe * plump, 0.4 * (0.94 + 0.06 * plump + 0.12 * this.gravid), 0.33 * breathe * plump);
     this.palps.forEach((p, i) => (p.rotation.x = 0.6 + Math.sin(t * 2.3 + i * 1.9) * 0.12 + this.eating * Math.sin(t * 13 + i) * 0.3));
 
     for (const L of this.legs) {

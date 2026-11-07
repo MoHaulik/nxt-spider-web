@@ -28,7 +28,7 @@ export type SacSave = { p: number[]; age: number };
 
 type Colony = { pos: Vector3; normal: Vector3; pop: number; seed: number; segs: Float32Array; kinds: Uint8Array; r: number; built: number; spots: Vector3[] };
 type Baby = { p: Vector3; from: Vector3; to: Vector3; t: number; dur: number; state: 'ball' | 'fly' | 'home'; colony: Colony | null; jitter: number; ball: Vector3 };
-type Sac = { pos: Vector3; age: number; mesh: Mesh; hatched: boolean; particle: number };
+type Sac = { pos: Vector3; age: number; mesh: Mesh; hatched: boolean; particle: number; grow: number; quiver: number };
 
 const rnd = (seed: number) => {
   let s = seed >>> 0 || 1;
@@ -102,20 +102,22 @@ export class Brood {
 
   // ---------------- egg sacs ----------------
 
-  lay(pos: Vector3, particle: number, age = 0) {
+  /** `grow` < 1: the sac is still being spun, and swells to full size over the next seconds. */
+  lay(pos: Vector3, particle: number, age = 0, grow = 1) {
     const mesh = new Mesh(this.sacGeo, this.sacMat);
-    mesh.scale.set(0.0085, 0.011, 0.0085);
+    mesh.scale.set(0.0085, 0.011, 0.0085).multiplyScalar(Math.max(0.05, grow));
     mesh.position.copy(pos);
     this.group.add(mesh);
-    const sac = { pos: pos.clone(), age, mesh, hatched: false, particle };
+    const sac = { pos: pos.clone(), age, mesh, hatched: false, particle, grow, quiver: 0 };
     this.sacs.push(sac);
     return sac;
   }
 
   /** Hatch: a tight ball of spiderlings, which after a breath disperse on the air to the room. */
-  hatch(sac: Sac, count = 22) {
+  hatch(sac: Sac, count = 16) {
     if (sac.hatched) return;
     sac.hatched = true;
+    this.newFamilies = 0;
     this.group.remove(sac.mesh);
     for (let k = 0; k < count; k++) {
       const ball = new Vector3((Math.random() - 0.5) * 0.03, (Math.random() - 0.5) * 0.03, (Math.random() - 0.5) * 0.02);
@@ -124,11 +126,18 @@ export class Brood {
     this.onHatch?.(sac.pos);
   }
 
+  private newFamilies = 0;
+
   private pickColony(): Colony {
-    // join a young family nearby half the time; otherwise found a new one on a free real surface
-    const young = this.colonies.filter((c) => c.pop < 9);
-    if (young.length && Math.random() < 0.5) return young[Math.floor(Math.random() * young.length)];
+    // each hatching founds at most two new families on free real surfaces; the rest join a family
+    const cap = this.colonies.length ? 2 : 3;
+    if (this.newFamilies >= cap && this.colonies.length) {
+      const young = this.colonies.filter((c) => c.pop < 12);
+      const pool = young.length ? young : this.colonies;
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
     const free = this.sites.find((s) => this.colonies.every((c) => c.pos.distanceTo(s.pos) > 0.45));
+    if (free) this.newFamilies++;
     if (!free) return this.colonies.length ? this.colonies[Math.floor(Math.random() * this.colonies.length)] : this.found(this.sites[0]);
     return this.found(free);
   }
@@ -195,20 +204,27 @@ export class Brood {
 
   // ---------------- per frame ----------------
 
-  update(dt: number, wetness: number, silk: SilkMesh, drops: DropMesh, sacParticle: (i: number) => Vector3 | null, hatchAge: number) {
-    // sacs ride the web, and hatch when their time comes
+  /**
+   * Sacs ride the web. Once mature (`minAge`), a sac waits for warmth: when the sun comes back after rain
+   * (`warm`), it trembles for a few seconds and opens, as spiderlings disperse on warm, still air.
+   */
+  update(dt: number, wetness: number, silk: SilkMesh, drops: DropMesh, sacParticle: (i: number) => Vector3 | null, minAge: number, warm: boolean) {
     for (const s of this.sacs) {
       if (s.hatched) continue;
       s.age += dt;
+      if (s.grow < 1) {
+        s.grow = Math.min(1, s.grow + dt / 6);
+        const g = s.grow * s.grow * (3 - 2 * s.grow);
+        s.mesh.scale.set(0.0085, 0.011, 0.0085).multiplyScalar(Math.max(0.05, g));
+      }
       const at = sacParticle(s.particle);
       if (at) {
         s.pos.copy(at).y -= 0.011;
         s.mesh.position.copy(s.pos);
       }
-      // it trembles before it opens
-      const quiver = s.age > hatchAge - 6 ? Math.sin(s.age * 40) * 0.0006 * (s.age - hatchAge + 6) : 0;
-      s.mesh.position.x += quiver;
-      if (s.age >= hatchAge) this.hatch(s);
+      if (s.grow >= 1 && s.age >= minAge && (warm || s.quiver > 0)) s.quiver += dt;
+      s.mesh.position.x += s.quiver > 0 ? Math.sin(s.age * 40) * 0.0004 * Math.min(1, s.quiver) : 0;
+      if (s.quiver > 4) this.hatch(s);
     }
     this.sacs = this.sacs.filter((s) => !s.hatched);
 
@@ -283,6 +299,11 @@ export class Brood {
 
   pendingSacs() {
     return this.sacs.length;
+  }
+
+  /** A fly that wandered into a family's web: they eat, and the family grows. */
+  feedColony(c: Colony) {
+    this.grow(c, 1);
   }
 
   hatchAll() {

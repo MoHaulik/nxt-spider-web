@@ -54,7 +54,7 @@ export const CFG = {
   // flies
   flyLength: 0.011,
   flyFirstDelay: 2.5,
-  flyInterval: [7, 14] as [number, number],
+  flyInterval: [14, 24] as [number, number],
   flyEscape: 22,
   eatRadius: 0.05,
   eatHold: 0.55,
@@ -65,6 +65,18 @@ export const CFG = {
   growK: 9,
   hunger: 1 / 600, // food lost per second when you stop eating (slims back down)
 
+  // the silk economy: the web can only grow as fast as the spider is fed
+  silkBase: 1.4, // metres of silk in reserve at the start (about three threads)
+  silkPerFood: 0.35,
+  silkMax: 4.5,
+  silkRegen: 0.016, // metres per second, faster when recently fed
+  rungEvery: 0.38, // seconds between turns of the capture spiral
+  captureCost: 0.5, // sticky silk per metre laid
+  wrapTime: 1.6, // seconds to bind a fly (each tap is a turn)
+  mealsPerSac: 5,
+  sacMinAge: 75, // seconds before a sac can hatch (then it waits for sun after rain)
+  idleTakeover: 2.2, // seconds of a still or absent hand before the spider acts on its own
+
   // weather
   firstRain: 125, // seconds into free play
   rainLength: 75,
@@ -73,5 +85,7 @@ export const CFG = {
 
 if (FLAGS.fast) {
   CFG.firstRain = 25;
+  CFG.sacMinAge = 12;
+  CFG.mealsPerSac = 2;
   CFG.rainGap = [40, 60];
 }
