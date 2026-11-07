@@ -54,8 +54,8 @@ export const CFG = {
   // flies
   flyLength: 0.011,
   flyFirstDelay: 2.5,
-  flyInterval: [14, 24] as [number, number],
-  flyEscape: 22,
+  flyInterval: [8, 13] as [number, number],
+  flyEscape: 18,
   eatRadius: 0.05,
   eatHold: 0.55,
 
@@ -73,7 +73,7 @@ export const CFG = {
   rungEvery: 0.38, // seconds between turns of the capture spiral
   captureCost: 0.5, // sticky silk per metre laid
   wrapTime: 1.6, // seconds to bind a fly (each tap is a turn)
-  mealsPerSac: 5,
+  mealsPerSac: 4,
   sacMinAge: 75, // seconds before a sac can hatch (then it waits for sun after rain)
   idleTakeover: 2.2, // seconds of a still or absent hand before the spider acts on its own
 

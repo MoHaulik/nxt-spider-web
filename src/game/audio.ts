@@ -482,7 +482,7 @@ export class Audio {
       this.hiss.connect(this.master);
       s.start();
     }
-    glide(this.hiss.gain, Math.min(1, level) * 0.035, this.now, 0.05, 0.003);
+    glide(this.hiss.gain, (level > 0 ? 0.25 + Math.min(1, level) * 0.75 : 0) * 0.05, this.now, 0.05, 0.003); // audible whenever silk is paying out
   }
 
   suspend() {

@@ -20,6 +20,7 @@ import { CFG } from './config.js';
 import { CAPTURE, MOOR, RADIAL, Web } from './web.js';
 
 export type FlyState = 'fly' | 'stuck' | 'eaten' | 'gone';
+export type FlyKind = 'fly' | 'moth' | 'gnat';
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
@@ -30,6 +31,7 @@ function makeShared(env: Texture | null) {
   const abdomen = new MeshPhysicalMaterial({ color: new Color(0.16, 0.42, 0.24), metalness: 0.8, roughness: 0.2, iridescence: 0.8, iridescenceIOR: 1.8, clearcoat: 0.6, envMap: env });
   const golden = new MeshPhysicalMaterial({ color: new Color(0.95, 0.68, 0.22), metalness: 0.9, roughness: 0.18, iridescence: 0.6, envMap: env, emissive: new Color(0.35, 0.2, 0.04) });
   const leg = new MeshPhysicalMaterial({ color: new Color(0.03, 0.03, 0.03), roughness: 0.5 });
+  const mothBody = new MeshPhysicalMaterial({ color: new Color(0.42, 0.36, 0.28), roughness: 0.85, sheen: 1, sheenColor: new Color(0.9, 0.82, 0.7), sheenRoughness: 0.6, envMap: env });
   const wing = new ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -56,12 +58,30 @@ function makeShared(env: Texture | null) {
         gl_FragColor = vec4(col, a);
       }`,
   });
+  // a moth's wings: broad, dusty, opaque, with a soft eye-spot and a darker margin
+  const mothWing = new ShaderMaterial({
+    transparent: true,
+    side: DoubleSide,
+    vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: /* glsl */ `
+      varying vec2 vUv;
+      void main(){
+        vec2 q = vUv*2.0 - 1.0;
+        float shape = 1.0 - (q.x*q.x*0.75 + q.y*q.y*0.95);
+        if (shape < 0.0) discard;
+        vec3 c = mix(vec3(0.72,0.64,0.52), vec3(0.5,0.42,0.33), smoothstep(0.35, 0.0, shape));
+        float spot = smoothstep(0.16, 0.1, length(q - vec2(0.1, 0.15)));
+        c = mix(c, vec3(0.32,0.25,0.18), spot*0.8);
+        c += 0.04*sin(vUv.x*40.0)*sin(vUv.y*30.0);
+        gl_FragColor = vec4(c, 0.92*smoothstep(0.0, 0.08, shape));
+      }`,
+  });
   const wingGeo = new PlaneGeometry(1, 1);
   wingGeo.rotateX(-Math.PI / 2);
   wingGeo.translate(0.5, 0, -0.5);
   const parcel = new MeshPhysicalMaterial({ color: new Color(0.93, 0.9, 0.84), roughness: 0.7, sheen: 1, sheenColor: new Color(1, 1, 0.95), sheenRoughness: 0.4, envMap: env });
   return {
-    eye, thorax, abdomen, golden, leg, wing, wingGeo, parcel,
+    eye, thorax, abdomen, golden, leg, wing, wingGeo, parcel, mothBody, mothWing,
     sphere: new SphereGeometry(1, 24, 16),
     legGeo: new CylinderGeometry(0.008, 0.014, 1, 5).translate(0, -0.5, 0),
   };
@@ -92,10 +112,19 @@ export class Fly {
   private s: ReturnType<typeof makeShared>;
   heading = new Vector3(0, 0, 1);
 
-  constructor(env: Texture | null, golden = false) {
+  kind: FlyKind;
+  value: number; // food it gives
+  baseScale: number;
+  speed: number;
+
+  constructor(env: Texture | null, golden = false, kind: FlyKind = 'fly') {
     this.s = shared ??= makeShared(env);
     this.golden = golden;
+    this.kind = kind;
+    this.value = golden ? 3 : kind === 'moth' ? 2 : kind === 'gnat' ? 0.5 : 1;
+    this.speed = kind === 'moth' ? 0.6 : kind === 'gnat' ? 1.35 : 1;
     const s = this.s;
+    const moth = kind === 'moth';
     const add = (mat: MeshPhysicalMaterial, sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
       const m = new Mesh(s.sphere, mat);
       m.scale.set(sx, sy, sz);
@@ -103,14 +132,14 @@ export class Fly {
       this.g.add(m);
       return m;
     };
-    add(golden ? s.golden : s.thorax, 0.2, 0.19, 0.25, 0, 0, 0.08);
-    add(golden ? s.golden : s.abdomen, 0.2, 0.16, 0.3, 0, -0.02, -0.3);
-    add(s.thorax, 0.15, 0.14, 0.12, 0, 0.0, 0.36);
-    for (const x of [-1, 1]) add(s.eye, 0.1, 0.12, 0.09, x * 0.09, 0.03, 0.39);
+    add(golden ? s.golden : moth ? s.mothBody : s.thorax, 0.2, 0.19, 0.25, 0, 0, 0.08);
+    add(golden ? s.golden : moth ? s.mothBody : s.abdomen, 0.2, 0.16, moth ? 0.42 : 0.3, 0, -0.02, moth ? -0.38 : -0.3);
+    add(moth ? s.mothBody : s.thorax, 0.15, 0.14, 0.12, 0, 0.0, 0.36);
+    for (const x of [-1, 1]) add(moth ? s.leg : s.eye, 0.1, 0.12, 0.09, x * 0.09, 0.03, 0.39);
     for (const side of [-1, 1]) {
-      const w = new Mesh(s.wingGeo, s.wing);
+      const w = new Mesh(s.wingGeo, moth ? s.mothWing : s.wing);
       w.position.set(side * 0.06, 0.14, 0.14);
-      w.scale.set(side * 0.24, 1, 0.62);
+      w.scale.set(side * (moth ? 0.62 : 0.24), 1, moth ? 0.7 : 0.62);
       this.g.add(w);
       this.wings.push(w);
       for (let k = 0; k < 3; k++) {
@@ -122,7 +151,8 @@ export class Fly {
         this.legs.push(l);
       }
     }
-    this.g.scale.setScalar(CFG.flyLength * (golden ? 1.15 : 1));
+    this.baseScale = CFG.flyLength * (golden ? 1.15 : moth ? 1.7 : kind === 'gnat' ? 0.55 : 1);
+    this.g.scale.setScalar(this.baseScale);
     this.g.traverse((o) => ((o as Mesh).frustumCulled = false));
   }
 
@@ -163,7 +193,10 @@ export class Fly {
     const kicking = this.state === 'stuck' && this.burst > 0;
     this.wings.forEach((w, i) => {
       const side = i === 0 ? -1 : 1;
-      if (flying || kicking) {
+      if (this.kind === 'moth' && (flying || kicking)) {
+        w.rotation.z = side * Math.sin(t * 22 + (this.age % 1)) * 0.9;
+        w.rotation.y = 0;
+      } else if (flying || kicking) {
         w.rotation.z = side * rand(-0.9, 0.7);
         w.rotation.y = side * rand(-0.2, 0.4);
       } else {
@@ -195,8 +228,8 @@ export class Swarm {
   private tmp = { x: 0, y: 0, z: 0 };
   constructor(private env: Texture | null, private ev: SwarmEvents) {}
 
-  spawn(opts: { sure?: boolean; golden?: boolean; side?: number } = {}) {
-    const f = new Fly(this.env, !!opts.golden);
+  spawn(opts: { sure?: boolean; golden?: boolean; side?: number; kind?: FlyKind } = {}) {
+    const f = new Fly(this.env, !!opts.golden, opts.kind ?? 'fly');
     const side = opts.side ?? (Math.random() < 0.5 ? -1 : 1);
     f.p.set(side * rand(1.0, 1.6), rand(-0.2, 0.6), rand(-1.4, -0.3));
     f.v.set(-side * 0.3, 0, 0.1);
@@ -248,7 +281,8 @@ export class Swarm {
         if (f.age > 28 && !f.sure) f.leaving = true;
         const to = f.target.clone().sub(f.p);
         const d = to.length();
-        let speed = f.hover > 0 ? 0.05 : f.commit ? 0.55 : 0.42;
+        let speed = (f.hover > 0 ? 0.05 : f.commit ? 0.55 : 0.42) * f.speed;
+        if (f.kind === 'moth') f.v.y += Math.sin(t * 9 + f.age * 3) * 0.02; // a moth's bobbing flight
         if (d < 0.08 && !f.commit) f.retarget = Math.min(f.retarget, 0.2);
         f.hover -= dt;
         const desired = to.multiplyScalar(speed / Math.max(d, 1e-3));
@@ -265,12 +299,12 @@ export class Swarm {
           const hit = web.nearestC(f.p.x, f.p.y, f.p.z, 0.007, (1 << CAPTURE) | (1 << RADIAL) | (1 << MOOR));
           if (hit) {
             const k = web.kind[hit.c];
-            const p = f.sure ? 1 : k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08; // the first fly always sticks
+            const p = f.sure ? 1 : (k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08) * (f.kind === 'moth' ? 0.8 : 1); // the first fly always sticks
             if (Math.random() < p) {
               f.state = 'stuck';
               f.stuckC = hit.c;
               f.stuckT = hit.t;
-              f.escape = CFG.flyEscape * (f.golden ? 0.7 : 1);
+              f.escape = CFG.flyEscape * (f.golden ? 0.7 : f.kind === 'moth' ? 0.75 : 1);
               web.impulse(hit.c, hit.t, f.v.x * 0.02, f.v.y * 0.02, f.v.z * 0.03);
               f.v.set(0, 0, 0);
               this.ev.onStick(f);
@@ -309,7 +343,9 @@ export class Swarm {
         }
         if (f.burst > 0) {
           f.burst -= dt;
-          const s = 0.0012;
+          web.hp[f.stuckC] -= dt * (f.kind === 'moth' ? 0.07 : f.kind === 'gnat' ? 0.015 : 0.035); // it tears at the silk
+          web.glint[f.stuckC] = Math.max(web.glint[f.stuckC], 0.3);
+          const s = 0.0012 * (f.kind === 'moth' ? 2.5 : f.kind === 'gnat' ? 0.5 : 1);
           web.impulse(f.stuckC, f.stuckT, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s * 1.5);
         }
         f.escape -= dt;
