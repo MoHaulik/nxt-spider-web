@@ -222,6 +222,11 @@ export class Swarm {
         const c = Math.floor(Math.random() * web.nC);
         if (web.cAlive[c] && web.kind[c] === CAPTURE && web.born[c] <= web.time) best = c;
       }
+      // no sticky spiral yet: the first fly still finds a thread
+      for (let tries = 0; tries < 24 && best < 0 && f.sure; tries++) {
+        const c = Math.floor(Math.random() * web.nC);
+        if (web.cAlive[c] && web.kind[c] !== MOOR && web.born[c] <= web.time && web.anchored[web.ca[c]]) best = c;
+      }
       if (best >= 0) {
         web.pointOn(best, Math.random(), this.tmp);
         f.target.set(this.tmp.x, this.tmp.y, this.tmp.z - Math.sign(f.p.z || -1) * 0.4);
@@ -260,7 +265,7 @@ export class Swarm {
           const hit = web.nearestC(f.p.x, f.p.y, f.p.z, 0.007, (1 << CAPTURE) | (1 << RADIAL) | (1 << MOOR));
           if (hit) {
             const k = web.kind[hit.c];
-            const p = f.sure && k === CAPTURE ? 1 : k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08;
+            const p = f.sure ? 1 : k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08; // the first fly always sticks
             if (Math.random() < p) {
               f.state = 'stuck';
               f.stuckC = hit.c;

@@ -537,7 +537,34 @@ export class Game {
   }
   private errored = false;
 
+  /**
+   * The frame-rate guard: if frames run long on the headset, spend less at the edges of your view and on
+   * dew; when there is room again, give it back. (Judged at a 60 fps floor; we aim for 72.)
+   */
+  private guard() {
+    const now = performance.now();
+    const ms = now - this.lastFrameAt;
+    this.lastFrameAt = now;
+    if (!this.world.session || ms <= 0 || ms > 200) return;
+    this.frameMs += (ms - this.frameMs) * 0.05;
+    this.guardT += ms / 1000;
+    const slow = this.frameMs > 15.2, easy = this.frameMs < 12.2;
+    if ((slow && this.guardT > 2 && this.quality < 3) || (easy && this.guardT > 10 && this.quality > 0)) {
+      this.quality += slow ? 1 : -1;
+      this.guardT = 0;
+      this.world.renderer.xr.setFoveation([0.35, 0.6, 0.85, 1][this.quality]);
+      this.drops.limit = [Infinity, 3000, 2000, 1200][this.quality];
+      if (FLAGS.debug) console.log('[gossamer] quality', this.quality, this.frameMs.toFixed(1));
+    }
+    if (!slow && !easy) this.guardT = 0;
+  }
+  private lastFrameAt = 0;
+  private frameMs = 13.9;
+  private guardT = 0;
+  private quality = 0;
+
   private step(dtRaw: number) {
+    this.guard();
     if (this.phase === 'idle' || this.paused) return;
     const dt = Math.min(dtRaw, 1 / 30);
     this.clock += dt;
@@ -750,7 +777,7 @@ export class Game {
         this.audio.pluck(note(9 + Math.floor(prey.wrapT * 5)), 0.05, this.wpos(prey.p), 0.6);
         return;
       }
-      if (this.reserve < 0.06) {
+      if (this.reserve < 0.06 || !w.roomFor(60)) {
         // nothing left to spin: a dry little sound, and the abdomen shows why
         this.audio.pluck(note(0), 0.025, this.wpos(s), 0.25);
         return;
@@ -777,6 +804,8 @@ export class Game {
     w.set(L.head, s.x, s.y, s.z);
     const d = w.dist(L.last, L.head);
     w.base[L.c] = w.rest[L.c] = d;
+    // the solver is nearly full: tie off here rather than lose silk
+    if (d > CFG.spacing && !w.roomFor(10)) return this.release(new Set([...L.ids, L.head]));
     if (d > CFG.spacing) {
       w.im[L.head] = 1;
       const k = L.head * 3;
@@ -1073,7 +1102,9 @@ export class Game {
         if (this.swarm.alive() < maxFlies) this.spawnFly(false, this.eaten >= 5 && Math.random() < 0.08);
       }
       if (this.rainI > 0.4) for (const f of this.swarm.flies) if (f.state === 'fly') f.leaving = true;
-      if (this.clock - this.lastMeal > 60) this.food = Math.max(0, this.food - dt * CFG.hunger * 10);
+      if (this.clock - this.lastMeal > 60) this.food = Math.max(0, this.food - dt * CFG.hunger * 2);
+      // decay grows with the spider: forgiving while the web is young
+      this.web.decayScale = 0.3 + 0.7 * Math.min(1, this.eaten / 10);
     }
   }
 

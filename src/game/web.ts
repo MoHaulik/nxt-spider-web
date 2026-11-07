@@ -42,6 +42,7 @@ export class Web {
   private freeC: number[] = [];
   time = 0;
   decayOn = false;
+  decayScale = 1; // gentle while the web is young
   wind = 0.6;
   floorY = -1.1; // web-local height of the real floor, set from the room
   onBreak?: (c: number, x: number, y: number, z: number) => void;
@@ -53,6 +54,11 @@ export class Web {
     this.deg.fill(0);
     this.nP = this.nC = 0;
     this.freeP.length = this.freeC.length = 0;
+  }
+
+  /** Room left for more silk (the solver's fixed capacity, with a margin). */
+  roomFor(particles: number) {
+    return this.freeP.length + (this.MP - this.nP) > particles + 40 && this.freeC.length + (this.MC - this.nC) > particles * 3 + 80;
   }
 
   addP(x: number, y: number, z: number, im = 1): number {
@@ -139,6 +145,7 @@ export class Web {
     for (let k = 1; k <= n; k++) {
       const t = k / n;
       const id = k === n ? b : this.addP(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, 1);
+      if (id < 0) break;
       this.addC(prev, id, kind, thick, tension, delay + step * k);
       ids.push(id);
       prev = id;
@@ -212,8 +219,10 @@ export class Web {
       const a = ca[c], b = cb[c];
       const free = !this.anchored[a];
       const k = this.kind[c];
-      let rate = k === MOOR ? CFG.decayMoor : k === CAPTURE ? CFG.decayCapture : CFG.decay;
+      // the frame lines to the room are out of the spider's reach, so they hold; the web inside them does not
+      let rate = k === MOOR ? 0 : k === CAPTURE ? CFG.decayCapture : CFG.decay;
       if (!this.decayOn) rate = 0;
+      rate *= this.decayScale;
       rate *= 1 + this.cwet[c] * 1.2;
       if (free) rate = 0.55;
       this.hp[c] -= dt * rate;

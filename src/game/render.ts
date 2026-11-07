@@ -284,8 +284,10 @@ export class DropMesh {
     this.n = 0;
   }
 
+  limit = Infinity; // lowered by the frame-rate guard
+
   push(x: number, y: number, z: number, r: number) {
-    if (this.n >= this.max) return false;
+    if (this.n >= this.max || this.n >= this.limit) return false;
     const a = this.iPR.array as Float32Array, k = this.n++ * 4;
     a[k] = x;
     a[k + 1] = y;
