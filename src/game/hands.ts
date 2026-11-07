@@ -14,9 +14,11 @@ export type HandState = {
   down: boolean; // pinch began this frame
   up: boolean; // pinch ended this frame
   gap: number;
+  engaged: boolean; // raised in front of you: only an engaged hand steers or spins
+  flip: number; // frames the raw pinch has disagreed with the debounced one
 };
 
-const mk = (): HandState => ({ seen: false, lastSeen: -1, pos: new Vector3(), pinch: new Vector3(), tip: new Vector3(), pinching: false, down: false, up: false, gap: 1 });
+const mk = (): HandState => ({ seen: false, lastSeen: -1, pos: new Vector3(), pinch: new Vector3(), tip: new Vector3(), pinching: false, down: false, up: false, gap: 1, engaged: false, flip: 0 });
 
 // WebXR joint order
 const J = { wrist: 0, thumbTip: 4, indexMeta: 5, indexTip: 9, middleMeta: 10, middleProx: 11 };
@@ -91,7 +93,13 @@ export class Hands {
         h.tip.copy(it);
         const was = h.pinching;
         const sel = this.selecting.get(src);
-        h.pinching = sel === true || (was ? h.gap < 0.022 : h.gap < 0.007);
+        const raw = sel === true || (was ? h.gap < 0.022 : h.gap < 0.007);
+        // a pinch must hold for two frames to count: a one-frame tracking glitch never starts or ends a thread
+        h.flip = raw !== was ? h.flip + 1 : 0;
+        if (h.flip >= 2) {
+          h.pinching = raw;
+          h.flip = 0;
+        }
         h.down = h.pinching && !was;
         h.up = !h.pinching && was;
         h.seen = true;

@@ -17,6 +17,7 @@ import {
 import { Audio, note, type Voice } from './audio.js';
 import { CFG, FLAGS } from './config.js';
 import { type Fly, Swarm } from './flies.js';
+import { OneEuro3 } from './filter.js';
 import { Hands, type HandState } from './hands.js';
 import { sunCol, DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
 import { type Anchor, scanRoom } from './room.js';
@@ -189,7 +190,7 @@ export class Game {
       m.frustumCulled = false;
       m.visible = false;
       this.root.add(m);
-      this.sparks.push({ m, life: 0 });
+      this.sparks.push({ m, life: 0, max: 1, size: 0.01 });
     }
     this.hint = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.hint2 = sprite(gt, new Color(0.95, 0.9, 0.8));
@@ -612,21 +613,43 @@ export class Game {
       const m = o.addScaledVector(d, t);
       const hp = this.v3.set(m.x / CFG.gainX, m.y / CFG.gainY, 0).applyMatrix4(this.root.matrixWorld);
       this.hands.setMouse(hp, this.mouseDown, this.clock);
+      this.hands.right.engaged = true;
       this.active = this.hands.right;
+      this.tap = this.hands.right.down ? this.hands.right : null;
       this.neutral.set(0, 0, 0);
       this.needNeutral = false;
       return;
     }
     const L = this.hands.left, R = this.hands.right;
-    let a = this.active;
-    if (!a || !a.seen) a = R.seen ? R : L.seen ? L : null;
-    if (a && L.seen && R.seen) {
-      const other = a === L ? R : L;
-      if (other.down && !this.live) a = other;
+    // only a hand raised in front of you takes part; a hand resting in your lap is resting
+    const fh = this.v2.set(this.fwd.x, 0, this.fwd.z);
+    if (fh.lengthSq() < 1e-4) fh.set(0, 0, -1);
+    fh.normalize();
+    for (const h of [L, R]) {
+      if (!h.seen) {
+        h.engaged = false;
+        continue;
+      }
+      const w = this.v3.copy(h.pos).applyMatrix4(this.world.player.matrixWorld).sub(this.head);
+      const f = w.dot(fh), y = w.y;
+      h.engaged = h.engaged ? f > 0.07 && y > -0.68 : f > 0.12 && y > -0.6;
     }
-    if (a !== this.active) this.needNeutral = true;
+    // the steering hand is sticky; the other hand's taps spin without taking the spider away
+    let a = this.active && this.active.engaged ? this.active : R.engaged ? R : L.engaged ? L : null;
+    if (a !== this.active) {
+      this.needNeutral = true;
+      this.handFilter.reset();
+      if (a && this.clock - this.lastEngaged > 3 && this.phase !== 'intro') this.spider.wave = Math.max(this.spider.wave, 0.45); // it greets your hand
+    }
+    if (a) this.lastEngaged = this.clock;
     this.active = a;
+    this.tap = L.engaged && L.down ? L : R.engaged && R.down ? R : null;
   }
+  private tap: HandState | null = null;
+  private spinHand: HandState | null = null;
+  private lastEngaged = -10;
+  private handFilter = new OneEuro3(1.1, 2.4, 1.0);
+  private overT = 0;
 
   /** Your hand to the spider's target in the web plane. */
   private handLocal(h: HandState, out: Vector3) {
@@ -639,8 +662,8 @@ export class Game {
     if (this.controls) {
       const h = this.active;
       let hl: Vector3 | null = null;
-      if (h && h.seen) {
-        hl = this.handLocal(h, this.v1);
+      if (h && h.engaged) {
+        hl = this.handFilter.filter(this.handLocal(h, this.v1), dt, this.v1);
         const sp = hl.distanceTo(this.lastHand) / Math.max(dt, 1e-3);
         this.lastHand.copy(hl);
         this.handMotion += (Math.min(sp, 2) - this.handMotion) * (1 - Math.exp(-dt * 4));
@@ -653,21 +676,28 @@ export class Game {
         T.lerp(goal, 1 - Math.exp(-dt * 1.4));
         this.needNeutral = true;
       } else if (hl) {
-        if (this.needNeutral || this.clock - h!.lastSeen > 0.5) {
+        if (this.needNeutral) {
           this.neutral.set(hl.x - T.x / CFG.gainX, hl.y - T.y / CFG.gainY, hl.z);
           this.needNeutral = false;
         }
         T.set((hl.x - this.neutral.x) * CFG.gainX, (hl.y - this.neutral.y) * CFG.gainY, clamp((hl.z - this.neutral.z) * CFG.gainZ, -0.07, 0.07));
-        // keep the comfortable zone under the hand: if the target leaves the web, slide the neutral after it
+        // the edge of the web gives like a rubber band: more and more resistance, and back it glides.
+        // Held out there, the comfortable zone slowly follows your hand.
         const b = this.bounds;
         const r = Math.hypot(T.x, T.y);
         if (r > b) {
-          const k = (r - b) / r;
-          this.neutral.x += (T.x * k) / CFG.gainX;
-          this.neutral.y += (T.y * k) / CFG.gainY;
-          T.x *= b / r;
-          T.y *= b / r;
-        }
+          const ex = r - b;
+          const soft = b + ex / (1 + ex * 9);
+          const rx = T.x, ry = T.y;
+          T.x *= soft / r;
+          T.y *= soft / r;
+          this.overT += dt;
+          if (this.overT > 1.2) {
+            const k = Math.min(1, dt * 1.5);
+            this.neutral.x += ((rx - T.x) / CFG.gainX) * k;
+            this.neutral.y += ((ry - T.y) / CFG.gainY) * k;
+          }
+        } else this.overT = 0;
         T.y = Math.max(T.y, this.floorY + 0.25);
       } else this.needNeutral = true;
 
@@ -704,14 +734,14 @@ export class Game {
    */
   private spin(dt: number) {
     const canSpin = this.framed && this.controls && ['frame', 'spin', 'firstfly', 'eat', 'free'].includes(this.phase);
-    const h = this.active;
+    const tap = this.tap;
     const w = this.web;
     const s = this.spider.local(this.spider.spinneret, this.v1);
     const thick = CFG.baseThick + (CFG.maxThick - CFG.baseThick) * this.grow01;
     const reach = CFG.attachReach * (0.85 + this.spider.size * 0.15);
 
-    if (h?.down && !canSpin && this.controls) this.audio.pluck(note(5), 0.03, this.wpos(s), 0.4);
-    if (canSpin && h?.down && !this.live) {
+    if (tap && !canSpin && this.controls) this.audio.pluck(note(5), 0.03, this.wpos(s), 0.4);
+    if (canSpin && tap && !this.live) {
       // at a caught fly, a tap is a turn of silk around it
       const prey = this.preyNear();
       if (prey && !prey.wrapped) {
@@ -730,6 +760,8 @@ export class Game {
       const head = w.addP(s.x, s.y, s.z, 0);
       const c = w.addC(start, head, RADIAL, thick, 1);
       this.live = { start, last: start, head, c, ids: [start], cs: [c], len: 0, at: this.clock, tap: false, lost: 0 };
+      this.spinHand = tap;
+      this.pulse(w.p[start * 3], w.p[start * 3 + 1], w.p[start * 3 + 2], 0.018, 0.35); // where the thread begins
       this.audio.pluck(note(7), 0.09, this.wpos(s), 0.8);
       w.glint[c] = 1;
       return;
@@ -770,11 +802,13 @@ export class Game {
     if (this.attachTarget === L.start) this.attachTarget = -1;
 
     // a quick pinch-and-release is a tap: keep spinning until the next tap
-    if (h?.up && !L.tap) {
+    for (const c of L.cs) if (w.cAlive[c]) w.glint[c] = Math.max(w.glint[c], 0.4); // the thread being made glows faintly
+    const sh = this.spinHand;
+    if (sh?.up && !L.tap) {
       if (this.clock - L.at < 0.4) L.tap = true;
       else return this.release(skip);
-    } else if (h?.down && L.tap) return this.release(skip);
-    L.lost = h?.seen ? 0 : L.lost + dt;
+    } else if (tap && L.tap) return this.release(skip);
+    L.lost = sh?.seen ? 0 : L.lost + dt;
     const tooLong = L.len + d > CFG.maxThread * (0.8 + this.spider.size * 0.3);
     if (tooLong || L.lost > 1.5) this.release(skip);
   }
@@ -792,6 +826,8 @@ export class Game {
       L.ids.push(target);
       const done = this.tauten(L.ids, L.cs);
       w.connectivity();
+      this.lightAlong(done);
+      this.pulse(w.p[target * 3], w.p[target * 3 + 1], w.p[target * 3 + 2], 0.02, 0.4);
       this.threadsDone++;
       const len = L.len;
       this.audio.pluck(note(Math.round(12 - len * 8)), 0.16, this.wpos(this.S), 2.4);
@@ -801,6 +837,30 @@ export class Game {
       w.connectivity();
       this.audio.pluck(note(2), 0.04, this.wpos(this.S), 0.4);
     }
+  }
+
+  /** Light runs along a new thread from where it began to where it was tied: the silk drawn taut. */
+  private lightAlong(ids: number[]) {
+    const w = this.web;
+    const order = new Map<number, number>();
+    ids.forEach((id, k) => order.set(id, k));
+    for (let c = 0; c < w.nC; c++) {
+      if (!w.cAlive[c]) continue;
+      const a = order.get(w.ca[c]), b = order.get(w.cb[c]);
+      if (a === undefined || b === undefined || Math.abs(a - b) !== 1) continue;
+      w.glint[c] = 0;
+      const at = Math.min(a, b) * 0.022;
+      this.later.push({ t: this.clock + at, fn: () => w.cAlive[c] && (w.glint[c] = 1) });
+    }
+  }
+
+  /** A soft point of light that swells and fades: confirmation, where it happened. */
+  private pulse(x: number, y: number, z: number, size: number, life: number) {
+    const sp = this.sparks[this.sparkNext];
+    this.sparkNext = (this.sparkNext + 1) % this.sparks.length;
+    sp.m.position.set(x, y, z + 0.003);
+    sp.life = sp.max = life;
+    sp.size = size;
   }
 
   /**
@@ -1157,7 +1217,7 @@ export class Game {
     } else sunCol.setRGB(1.0, 0.86, 0.66);
     this.lights.key.color.copy(sunCol);
   }
-  private sparks: { m: Mesh; life: number }[] = [];
+  private sparks: { m: Mesh; life: number; max: number; size: number }[] = [];
   private sparkNext = 0;
 
   private get silkCap() {
@@ -1223,9 +1283,12 @@ export class Game {
       const tip = this.v1.copy(h.tip).applyMatrix4(this.world.player.matrixWorld).applyMatrix4(this.toLocal);
       const last = h === this.hands.left ? this.tipL : this.tipR;
       const vel = this.v2.copy(tip).sub(last).divideScalar(Math.max(dt, 1e-3));
+      // a finger passing through the web's surface counts, not only a centimetre-perfect touch
+      const crossed = Math.sign(last.z) !== Math.sign(tip.z) && Math.abs(last.z - tip.z) < 0.15;
+      const zAt = crossed ? 0 : tip.z;
       last.copy(tip);
-      if (this.pluckCool > 0 || vel.length() < 0.06 || Math.abs(tip.z) > 0.05) continue;
-      const hit = this.web.nearestC(tip.x, tip.y, tip.z, 0.012);
+      if (this.pluckCool > 0 || vel.length() < 0.05 || (!crossed && Math.abs(tip.z) > 0.03)) continue;
+      const hit = this.web.nearestC(tip.x, tip.y, zAt, crossed ? 0.022 : 0.015);
       if (!hit) continue;
       const k = Math.min(0.012, vel.length() * 0.01);
       vel.normalize();
@@ -1399,10 +1462,7 @@ export class Game {
       const c = Math.floor(Math.random() * w.nC);
       if (w.cAlive[c]) {
         const hit = w.pointOn(c, Math.random(), { x: 0, y: 0, z: 0 });
-        const sp = this.sparks[this.sparkNext];
-        this.sparkNext = (this.sparkNext + 1) % this.sparks.length;
-        sp.m.position.set(hit.x, hit.y, hit.z + 0.002);
-        sp.life = 0.22;
+        this.pulse(hit.x, hit.y, hit.z - 0.001, 0.011, 0.22);
         w.impulse(c, 0.5, 0, -0.0004, 0);
         if (Math.random() < 0.35) this.audio.tick(this.wpos(hit), 0.008 + Math.random() * 0.014);
       }
@@ -1410,7 +1470,7 @@ export class Game {
     for (const sp of this.sparks) {
       sp.life -= dt;
       sp.m.visible = sp.life > 0;
-      if (sp.life > 0) sp.m.scale.setScalar(0.011 * Math.sin((sp.life / 0.22) * Math.PI));
+      if (sp.life > 0) sp.m.scale.setScalar(sp.size * Math.sin((sp.life / sp.max) * Math.PI));
     }
   }
 
