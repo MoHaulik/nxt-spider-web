@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "gossamer", "runtimeExecutable": "npx", "runtimeArgs": ["vite", "--host", "0.0.0.0", "--port", "8081"], "port": 8081, "url": "https://localhost:8081" },
+    { "name": "gossamer-http", "runtimeExecutable": "env", "runtimeArgs": ["HTTP=1", "npx", "vite", "--port", "8082"], "port": 8082 }
+  ]
+}
