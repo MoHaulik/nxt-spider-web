@@ -1416,7 +1416,7 @@ export class Game {
 
   private sky(dt: number) {
     const free = this.phase === 'free';
-    if (free && this.birdAt === Infinity && this.eaten >= CFG.birdAfter) this.birdAt = this.clock + (FLAGS.bird || FLAGS.fast ? 6 : 25);
+    if (free && this.birdAt === Infinity && (this.eaten >= CFG.birdAfter || this.phaseT > CFG.birdLatest)) this.birdAt = this.clock + (FLAGS.bird || FLAGS.fast ? 6 : 25);
     if (free && this.rainI < 0.2 && !this.trip && this.clock >= this.birdAt && !this.bird.active && this.birdWarn <= 0) this.callBird();
     if (this.birdWarn > 0) {
       this.birdWarn -= dt;
@@ -1599,7 +1599,7 @@ export class Game {
     this.reserve = Math.min(this.silkCap, this.reserve + 0.6);
     if (this.brood.pendingSacs() > 0) {
       this.carry = 1; // the next thing it does is take this to its eggs
-    } else if (this.gravid < 1 && (this.birds >= 1 || FLAGS.fast)) {
+    } else if (this.gravid < 1 && (this.birds >= 1 || FLAGS.fast || (this.phase === 'free' && this.phaseT > CFG.eggsLatest))) {
       // eggs come late in the story: once the web has weathered rain and been raided and held
       this.gravid = Math.min(1, this.gravid + Math.min(1, f.value) / CFG.mealsPerSac);
       if (this.gravid >= 1) this.chooseNest();

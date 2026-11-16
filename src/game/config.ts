@@ -85,7 +85,9 @@ export const CFG = {
   // the arc of a session: what each chapter waits for
   rainAfter: 3, // meals before the first rain can come
   rainLatest: 240, // ...or this many seconds of free play
-  birdAfter: 7, // meals before the first bird (it needs a web worth raiding)
+  birdAfter: 7, // meals before the first bird (it needs a web worth raiding)...
+  birdLatest: 300, // ...or this many seconds of free play, so a short session still meets it
+  eggsLatest: 420, // eggs open after the first bird, or after this many seconds of free play
   birdGap: [150, 260] as [number, number],
   birdWarn: 3.4, // seconds between the first call and the pass
   heavyDropGap: [3.2, 5.6] as [number, number], // seconds between drops gathering on the ceiling in rain
@@ -103,6 +105,8 @@ if (FLAGS.fast) {
   CFG.rainLatest = 40;
   CFG.rainAfter = 1;
   CFG.birdAfter = 2;
+  CFG.birdLatest = 60;
+  CFG.eggsLatest = 90;
   CFG.birdGap = [40, 70];
   CFG.sacMinAge = 12;
   CFG.mealsPerSac = 2;

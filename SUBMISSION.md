@@ -53,10 +53,17 @@ A small spider descends into your real room. Swing it to tie a web to your walls
 
 ## Video plan (under 3 minutes, captured on Quest 3)
 
-1. **0:00–0:25:** the room dims, the ceiling glint, the descent. No cuts.
-2. **0:25–0:50:** the hand swings the spider side to side; lines run out to the real wall, the sofa, the floor; the ring closes.
-3. **0:50–1:15:** first threads; the spider sweeps round and the spiral follows; a fly arrives by sound, gets caught, the slow-motion meal, the spider grows.
-4. **1:15–1:50:** rain with depth. A drop gathers on the ceiling and falls; the spider dodges (or is knocked down). The sun comes back onto the wet web; the feast.
-5. **1:50–2:20:** the bird calls; the spider freezes; the bird tears through.
-6. **2:20–2:45:** an egg sac fed and hatching; spiderlings balloon to the real walls.
-7. **2:45–2:55:** the next morning: the room with its small webs, the spider waiting.
+Lead with the hook, then the story. Judges may stop at any time.
+
+1. **0:00–0:06 (hook):** the finished web in your real living room, beaded with dew, and the bird tearing straight through it. One shot, no title.
+2. **0:06–0:25:** the room dims, the ceiling glint, the small spider's descent. No cuts.
+3. **0:25–0:50:** the hand swings the spider side to side; lines run out to the real wall, the sofa, the floor; the ring closes.
+4. **0:50–1:15:** first threads; the spider sweeps round and the spiral follows; a fly arrives by sound, gets caught, the slow-motion meal, the spider grows.
+5. **1:15–1:50:** rain with depth. A drop gathers on the ceiling and falls; the spider dodges (or is knocked down). The sun comes back onto the wet web; the feast.
+6. **1:50–2:15:** the bird calls; the spider freezes; the bird tears through.
+7. **2:15–2:40:** an egg sac fed and hatching; spiderlings balloon to the real walls.
+8. **2:40–2:55:** the next morning: the room with its small webs, the spider waiting. Title card last.
+
+## Testing instructions (for the Devpost form)
+
+Open the link in the Meta Quest browser on a Quest 3 with your room set up (Settings, Physical Space, Space Setup) and hand tracking on. Sit down, tap "enter", and use your hands only. Swing the spider toward your walls to tie the web, tap your fingers to spin, hold still when the bird calls. A full session is about ten minutes; come back the next day to see the brood.
