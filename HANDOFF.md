@@ -58,6 +58,7 @@ Stack: IWSDK 1.1.0-rc.2 (three.js r185), TypeScript, Vite. Code is in `src/game/
 
 ## Status and next steps
 - **16 Nov 2026 (this session):** rebuilt around the owner's feedback: friendlier, smaller-then-growing spider; the swing-to-scaffold intro; the spiral laid where the spider is; rain with depth and heavy drops to dodge; the bird; eggs moved to the end of the arc and fed by meals. Verified in the desktop preview (`?desktop&fast&fresh`), typechecked and built. **Not yet tested on a headset.** Merged into `main` and deployed to GitHub Pages (commit 083198b).
+- **Later on 16 Nov:** time fallbacks (`birdLatest`, `eggsLatest`) so a ten-minute session reaches the bird and the eggs; a cue when the spider acts on its own (it glances at you, and a soft point of light marks where it is going); automatic space setup (`roomCheck`: on a fresh session with no detected planes after 3 s it calls `XRSession.initiateRoomCapture`, and only then creates the persistent anchor, because space setup wipes anchors); the video plan leads with a hook. Frame rate on the Quest is **still unmeasured** (no headset was connected over USB; `metavr device list` was empty).
 - **Remaining:**
   - Headset test on Quest 3: the swing-to-scaffold feel (trigger radius `frameR * 0.72`, angular window 0.55 rad in `frameStep`), the spiral reach, the heavy-drop dodge, the bird's hit box (0.11) and whether the "hold still" rule reads. Verify 60 fps or better (the rain is now 700 instanced quads; `Rain.N`).
   - Record the gameplay video under 3 minutes (shot list in `SUBMISSION.md`).

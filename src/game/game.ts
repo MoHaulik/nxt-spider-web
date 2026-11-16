@@ -385,9 +385,50 @@ export class Game {
       this.scan(frame);
       if (this.phase === 'frame' && !this.framed) this.startFrame();
     }
+    this.roomCheck(frame);
   }
 
   private anchorId?: string = this.save?.anchorId;
+  private captureState: 'wait' | 'asked' | 'done' = 'wait';
+  private planesSeen = 0;
+
+  /**
+   * A room the headset has never scanned has no planes, so the web could only tie to the floor and a
+   * guessed ceiling. Three seconds into a fresh session (the planes take a moment to arrive), if there
+   * are still none, ask the headset to run its space setup right here, then look again. The persistent
+   * anchor is only created once that is settled, because space setup wipes anchors.
+   */
+  private roomCheck(frame: XRFrame) {
+    if (this.captureState === 'done' || this.desktop) return;
+    if (this.phase === 'idle' || this.phase === 'placing') return;
+    if (this.captureState === 'asked') return;
+    const planes = (frame as unknown as { detectedPlanes?: Set<XRPlane> }).detectedPlanes;
+    if (planes && planes.size > 0) this.planesSeen = planes.size;
+    if (this.save || this.planesSeen > 0) return this.settleRoom();
+    if (this.phaseT < 3) return;
+    const session = frame.session as XRSession & { initiateRoomCapture?: () => Promise<undefined> };
+    if (!session.initiateRoomCapture) return this.settleRoom();
+    this.captureState = 'asked';
+    this.persistOk = false;
+    session
+      .initiateRoomCapture()
+      .catch(() => {})
+      .then(() => {
+        // give the new planes a moment to arrive, then read the room again and hang the web in it
+        this.later.push({ t: this.clock + 1.5, fn: () => {
+          this.wantScan = true;
+          this.settleRoom();
+        } });
+      });
+  }
+
+  private settleRoom() {
+    if (this.captureState === 'done') return;
+    this.captureState = 'done';
+    this.persistOk = true;
+    if (!this.anchor && !this.save) this.wantAnchor = true;
+  }
+  private persistOk = true;
 
   // ---------------------------------------------------------------- placement & room
 
@@ -418,7 +459,8 @@ export class Game {
     }
     if (!fromAnchor) {
       this.placeFresh();
-      if (!this.desktop) this.wantAnchor = true;
+      // the anchor waits until we know whether space setup must run first (it wipes anchors)
+      if (!this.desktop && this.save) this.wantAnchor = true;
     }
     this.root.updateMatrixWorld(true);
     this.root.visible = true;
@@ -636,7 +678,7 @@ export class Game {
   }
 
   private persist() {
-    if (!this.framed || this.desktop && !FLAGS.debug) return;
+    if (!this.framed || !this.persistOk || this.desktop && !FLAGS.debug) return;
     if (this.phase === 'idle' || this.phase === 'placing' || this.phase === 'frame' || (this.phase === 'intro' && !this.returning)) return;
     try {
       const s: Save = { web: this.web.serialize(), food: this.food, eaten: this.eaten, ceilY: this.ceilY, floorY: this.floorY, anchorId: this.anchorId, savedAt: Date.now(), born: this.save?.born ?? Date.now(),
@@ -876,7 +918,9 @@ export class Game {
       this.stillT = !aim || this.handMotion < 0.06 ? this.stillT + dt : 0;
       // only when you lower your hand does the spider go about its own business
       const goal = this.autoTarget();
-      this.auto = !aim && !!goal && this.handIdle > 1.2;
+      const auto = !aim && !!goal && this.handIdle > 1.2;
+      if (auto && !this.auto) this.glanceT = this.clock; // it looks at you before it goes
+      this.auto = auto;
       if (this.stun > 0) {
         // knocked off: it hangs low on its dragline until it gathers itself
         this.stun -= dt;
@@ -1676,6 +1720,7 @@ export class Game {
       const prey = this.swarm.flies.find((f) => f.state === 'stuck' && !f.wrapped);
       if (prey) want = clamp((prey.p.x - this.S.x) * 3, -0.9, 0.9);
       if (this.phase === 'frame' && this.frameLook !== null) want = this.frameLook;
+      if (this.clock - this.glanceT < 1.3) want = 0.85; // the glance: it turns its head toward you
       if (this.birdWarn > 0 || this.bird.active) want = this.birdSide * 0.85;
       this.twist += (want - this.twist) * (1 - Math.exp(-dt * 2.2));
       this.groomT -= dt;
@@ -1753,6 +1798,7 @@ export class Game {
   private handMotion = 0;
   private stillT = 0;
   private auto = false;
+  private glanceT = -10;
   private lastHand = new Vector3();
   private autoGoal = new Vector3();
   private attention: { p: Vector3; t: number } | null = null;
@@ -1981,12 +2027,16 @@ export class Game {
     this.silk.end();
     this.drops.end();
 
-    // where the silk will catch when you let go
+    // where the silk will catch when you let go; or, when your hand rests, where the spider is off to
     const at = this.attachTarget;
-    this.glow.visible = at >= 0;
+    this.glow.visible = at >= 0 || (this.auto && this.controls && !this.trip);
     if (at >= 0) {
       this.glow.position.set(w.p[at * 3], w.p[at * 3 + 1], w.p[at * 3 + 2] + 0.003);
       this.glow.scale.setScalar(0.022 + Math.sin(this.clock * 9) * 0.004);
+    } else if (this.glow.visible) {
+      const g = this.autoGoal;
+      this.glow.position.set(g.x, g.y, g.z + 0.003);
+      this.glow.scale.setScalar(0.016 + Math.sin(this.clock * 2.5) * 0.004);
     }
     // a fly in the web, waiting
     const stuck = this.swarm.flies.find((f) => f.state === 'stuck');

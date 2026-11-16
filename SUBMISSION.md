@@ -67,3 +67,13 @@ Lead with the hook, then the story. Judges may stop at any time.
 ## Testing instructions (for the Devpost form)
 
 Open the link in the Meta Quest browser on a Quest 3 with your room set up (Settings, Physical Space, Space Setup) and hand tracking on. Sit down, tap "enter", and use your hands only. Swing the spider toward your walls to tie the web, tap your fingers to spin, hold still when the bird calls. A full session is about ten minutes; come back the next day to see the brood.
+
+## Submission checklist (do in this order, 17 Nov evening)
+
+1. **Freeze the build.** After the headset test and any last tuning: `npm run deploy`, then `git tag competition-submission && git push origin --tags`. No deploys after submitting; the entry must stay unchanged until the winner announcement (around 11 Dec).
+2. **Record on the Quest 3.** Settings, Camera, Record video (passthrough is captured). Good daylight in the room so passthrough is clean. Record each beat of the shot list as its own clip, several takes; the hook shot (the bird through the finished dewy web) is easiest with `?fast&bird`. Pull the clips off with the Meta Quest Developer Hub or a USB cable.
+3. **Cut the video** to under 3 minutes (the shot list above), real footage only, no AI video, no music you do not own (the game's own sound is fine and original). Export 1080p. Upload to YouTube as Public (not Unlisted: the rules say publicly visible). Copy the link.
+4. **Stills.** Four to six frames from the clips for the Devpost gallery: the descent, the scaffold swing, the dewy web, the bird, the spiderlings on a real wall, the morning after.
+5. **Devpost form** (https://start-developer-competition-26.devpost.com, Enter a Submission). Be logged in with the account that joined the hackathon and is a Meta VR Start member. Fill in: project name; tagline (above, under 140 characters); description (above); "built with" tags (WebXR, IWSDK, three.js, TypeScript, Vite, GitHub Pages); the playable link https://mohaulik.github.io/nxt-spider-web/; the video link; the GitHub repo link; Track: Gaming; Division: New Experience; target launch date; the testing instructions above; the hand-interactions list above. Tick any special awards the form offers (Best First Five Minutes, Best Reason to Come Back, Boldest Original Concept).
+6. **Submit**, then open the public project page and check the video plays, the link opens in the Quest browser, and the text reads well. Keep a copy of everything (the rules ask you to retain a copy of your entry).
+7. **Deadline: 18 Nov 2026, 12:00 PM PST = 21:00 Danish time.** Aim to be done the evening of the 17th.
