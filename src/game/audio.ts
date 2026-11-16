@@ -400,6 +400,72 @@ export class Audio {
     glide(this.rainGain.gain, level * 0.5, this.now, 0.6, 0.01);
   }
 
+  /** A bird, off to one side: two clear falling whistles. */
+  birdCall(pos: [number, number, number]) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t0 = this.now;
+    const g = this.out(pos, 0.7);
+    for (const [at, f0, f1, dur] of [[0, 2600, 1900, 0.22], [0.3, 2300, 1500, 0.3]]) {
+      const t = t0 + at;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      const e = ctx.createGain();
+      e.gain.setValueAtTime(0, t);
+      e.gain.linearRampToValueAtTime(0.09, t + 0.03);
+      e.gain.setValueAtTime(0.09, t + dur * 0.6);
+      e.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.08);
+      o.connect(e);
+      e.connect(g);
+      o.start(t);
+      o.stop(t + dur + 0.1);
+    }
+  }
+
+  /** Wings, close: a rush of air that drops in pitch as it passes. */
+  whoosh(pos: [number, number, number]) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = this.now;
+    const s = ctx.createBufferSource();
+    s.buffer = this.noise;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(600, t);
+    lp.frequency.exponentialRampToValueAtTime(2600, t + 0.45);
+    lp.frequency.exponentialRampToValueAtTime(250, t + 1.3);
+    lp.Q.value = 0.8;
+    const e = ctx.createGain();
+    e.gain.setValueAtTime(0.0001, t);
+    e.gain.exponentialRampToValueAtTime(0.5, t + 0.5);
+    e.gain.exponentialRampToValueAtTime(0.0001, t + 1.35);
+    s.connect(lp);
+    lp.connect(e);
+    e.connect(this.out(pos, 0.5));
+    s.start(t, Math.random());
+    s.stop(t + 1.4);
+    // three heavy wingbeats under it
+    for (let k = 0; k < 3; k++) this.noiseBurst(0.12, 180, 0.2, pos);
+  }
+
+  /** Something heavy hitting the spider: a low, short thud. */
+  thud(pos: [number, number, number]) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = this.now;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.22);
+    const e = ctx.createGain();
+    e.gain.setValueAtTime(0.4, t);
+    e.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    o.connect(e);
+    e.connect(this.out(pos, 0.4));
+    o.start(t);
+    o.stop(t + 0.4);
+    this.noiseBurst(0.09, 320, 0.12, pos);
+  }
+
   /** A drop striking silk: a single high glassy note, near where it hit. */
   tick(pos: [number, number, number], gain = 0.03) {
     if (!this.ctx) return;

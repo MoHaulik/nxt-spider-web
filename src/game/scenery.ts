@@ -9,9 +9,11 @@ import {
   Color,
   CustomBlending,
   DirectionalLight,
+  DoubleSide,
   DynamicDrawUsage,
   Group,
-  LineSegments,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
   Mesh,
   MeshBasicMaterial,
   OneFactor,
@@ -71,73 +73,100 @@ export function makeLights(root: Group) {
 
 // ---------------- rain ----------------
 
-/** A soft local shower around the web: streaks only inside a column of light around it. */
+/**
+ * Rain with depth: real drops, not lines. Each drop is a camera-facing ribbon with a round, bright
+ * head and a fading tail, as thick as a drop at any distance (never thinner than a pixel), falling
+ * through a column all around the web and between you and it, so near drops pass large and fast
+ * and far ones are a fine mist. Drops that land call `onFloor` so the floor can splash.
+ */
 export class Rain {
-  readonly mesh: LineSegments;
-  private N = 520;
+  readonly mesh: Mesh;
+  private N = 700;
   private p: Float32Array;
   private v: Float32Array;
-  private attr: BufferAttribute;
+  private iP: InstancedBufferAttribute;
+  private iV: InstancedBufferAttribute;
+  private geo: InstancedBufferGeometry;
   intensity = 0;
   private mat: ShaderMaterial;
+  onFloor?: (x: number, y: number, z: number) => void;
 
   constructor() {
     this.p = new Float32Array(this.N * 3);
     this.v = new Float32Array(this.N);
-    const pos = new Float32Array(this.N * 6);
-    const g = new BufferGeometry();
-    this.attr = new BufferAttribute(pos, 3);
-    this.attr.setUsage(DynamicDrawUsage);
-    g.setAttribute('position', this.attr);
-    const end = new Float32Array(this.N * 2);
-    const bright = new Float32Array(this.N * 2);
+    const g = (this.geo = new InstancedBufferGeometry());
+    // a quad: x across the drop (-1..1), y along it (0 at the head, 1 at the tail end)
+    g.setAttribute('position', new BufferAttribute(new Float32Array([-1, 0, 0, 1, 0, 0, -1, 1, 0, 1, 1, 0]), 3));
+    g.setIndex([0, 1, 2, 2, 1, 3]);
+    this.iP = new InstancedBufferAttribute(new Float32Array(this.N * 3), 3);
+    this.iP.setUsage(DynamicDrawUsage);
+    this.iV = new InstancedBufferAttribute(new Float32Array(this.N * 3), 3);
+    g.setAttribute('iP', this.iP);
+    g.setAttribute('iV', this.iV);
+    const V = this.iV.array as Float32Array;
     for (let i = 0; i < this.N; i++) {
-      end[i * 2 + 1] = 1;
-      bright[i * 2] = bright[i * 2 + 1] = 0.35 + Math.pow(Math.random(), 2) * 0.65;
+      this.respawn(i, true);
+      V[i * 3] = 0.05; // length, set per frame from speed
+      V[i * 3 + 1] = 0.3 + Math.pow(Math.random(), 2) * 0.7; // brightness
+      V[i * 3 + 2] = Math.random(); // seed
     }
-    g.setAttribute('aEnd', new BufferAttribute(end, 1));
-    g.setAttribute('aB', new BufferAttribute(bright, 1));
-    for (let i = 0; i < this.N; i++) this.respawn(i, true);
+    g.instanceCount = this.N;
     this.mat = new ShaderMaterial({
       transparent: true,
       depthWrite: false,
+      side: DoubleSide,
       blending: CustomBlending,
       blendSrc: OneFactor,
       blendDst: OneMinusSrcAlphaFactor,
-      uniforms: { uI: { value: 0 }, uSun: { value: new Vector3(0, 0, -1) }, uSunCol: { value: sunCol } },
+      uniforms: { uI: { value: 0 }, uSun: { value: new Vector3(0, 0, -1) }, uSunCol: { value: sunCol }, uDown: { value: new Vector3(0, -1, 0) }, uMinW: { value: 0.0012 } },
       vertexShader: /* glsl */ `
-        attribute float aEnd; attribute float aB;
-        uniform vec3 uSun;
-        varying float vEnd; varying vec3 vL; varying float vB; varying float vGlow;
+        attribute vec3 iP; attribute vec3 iV;
+        uniform vec3 uSun; uniform vec3 uDown; uniform float uMinW;
+        varying vec2 vUv; varying float vB; varying float vGlow; varying float vScale; varying float vNear;
         void main(){
-          vEnd = aEnd; vL = position; vB = aB;
-          vec4 w = modelMatrix*vec4(position,1.0);
-          // rain is seen best against the light: streaks between you and the sun catch it
-          vGlow = pow(max(0.0, dot(normalize(w.xyz - cameraPosition), uSun)), 5.0);
-          gl_Position = projectionMatrix*viewMatrix*w;
+          vec3 C = (modelMatrix*vec4(iP,1.0)).xyz;
+          vec3 toC = cameraPosition - C; float dist = max(length(toC), 1e-4);
+          vec3 up = -uDown;
+          vec3 side = normalize(cross(up, toC/dist) + vec3(1e-6));
+          float w = 0.0013;
+          float wr = max(w, dist*uMinW);
+          vScale = clamp(w/wr, 0.0, 1.0);
+          vNear = smoothstep(1.2, 0.25, dist);
+          vec3 P = C + up*(position.y*iV.x) + side*(position.x*wr);
+          vUv = position.xy; vB = iV.y;
+          // rain is seen best against the light: drops between you and the sun catch it
+          vGlow = pow(max(0.0, dot(-toC/dist, uSun)), 4.0);
+          gl_Position = projectionMatrix*viewMatrix*vec4(P, 1.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform float uI; uniform vec3 uSunCol;
-        varying float vEnd; varying vec3 vL; varying float vB; varying float vGlow;
+        varying vec2 vUv; varying float vB; varying float vGlow; varying float vScale; varying float vNear;
         void main(){
-          float r = length(vL.xz*vec2(1.0, 1.4));
-          float a = uI * vB * (0.09 + 0.4*vGlow) * smoothstep(1.0, 0.3, r) * (0.15 + 0.85*vEnd);
-          vec3 c = mix(vec3(0.78, 0.82, 0.9), uSunCol*1.5, vGlow);
+          float x2 = vUv.x*vUv.x;
+          float across = 1.0 - x2;
+          // a round head that holds the light, and a tail that thins away
+          float head = smoothstep(0.22, 0.0, vUv.y) * (1.0 - x2);
+          float tail = exp(-vUv.y*3.2) * (1.0 - vUv.y) * across;
+          float hi = pow(max(0.0, 1.0 - (vUv.x+0.35)*(vUv.x+0.35)*2.2), 3.0) * head; // a highlight on the head's lit side
+          float a = uI * vB * (0.1 + 0.55*vGlow + 0.12*vNear) * (head*0.9 + tail*0.45) * vScale;
+          vec3 c = mix(vec3(0.74, 0.8, 0.9), uSunCol*1.6, vGlow) + hi*0.8;
+          a = clamp(a, 0.0, 1.0);
           gl_FragColor = vec4(c*a, a);
         }`,
     });
-    this.mesh = new LineSegments(g, this.mat);
+    this.mesh = new Mesh(g, this.mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 12;
   }
 
   private respawn(i: number, anywhere: boolean) {
-    const r = Math.sqrt(Math.random()) * 1.0;
+    // a column around the web, and some of it between you and the web (z toward the player)
+    const r = Math.sqrt(Math.random()) * 1.25;
     const a = Math.random() * Math.PI * 2;
     this.p[i * 3] = Math.cos(a) * r;
-    this.p[i * 3 + 1] = anywhere ? -1.2 + Math.random() * 2.8 : 1.6 + Math.random() * 0.5;
-    this.p[i * 3 + 2] = Math.sin(a) * r * 0.7 - 0.15;
-    this.v[i] = 3.6 + Math.random() * 1.4;
+    this.p[i * 3 + 1] = anywhere ? -1.2 + Math.random() * 2.8 : 1.5 + Math.random() * 0.7;
+    this.p[i * 3 + 2] = Math.min(0.5, Math.sin(a) * r * 0.85 - 0.1);
+    this.v[i] = 2.6 + Math.random() * 1.6;
   }
 
   setSun(worldDir: Vector3) {
@@ -148,21 +177,24 @@ export class Rain {
     this.mat.uniforms.uI.value = this.intensity;
     this.mesh.visible = this.intensity > 0.01;
     if (!this.mesh.visible) return;
-    const P = this.attr.array as Float32Array;
+    const P = this.iP.array as Float32Array, V = this.iV.array as Float32Array;
+    const n = Math.floor(this.N * (0.35 + 0.65 * this.intensity));
     for (let i = 0; i < this.N; i++) {
       const k = i * 3;
       this.p[k + 1] -= this.v[i] * dt;
-      this.p[k] += 0.16 * dt;
-      if (this.p[k + 1] < floorY) this.respawn(i, false);
-      const len = 0.05 + this.v[i] * 0.012;
-      P[i * 6] = this.p[k];
-      P[i * 6 + 1] = this.p[k + 1] + len;
-      P[i * 6 + 2] = this.p[k + 2];
-      P[i * 6 + 3] = this.p[k] - 0.006;
-      P[i * 6 + 4] = this.p[k + 1];
-      P[i * 6 + 5] = this.p[k + 2];
+      this.p[k] += 0.12 * dt;
+      if (this.p[k + 1] < floorY) {
+        if (i < n && this.onFloor && Math.random() < 0.3) this.onFloor(this.p[k], floorY, this.p[k + 2]);
+        this.respawn(i, false);
+      }
+      P[k] = this.p[k];
+      P[k + 1] = this.p[k + 1];
+      P[k + 2] = this.p[k + 2];
+      V[k] = 0.03 + this.v[i] * 0.014;
     }
-    this.attr.needsUpdate = true;
+    this.iP.needsUpdate = true;
+    this.iV.needsUpdate = true;
+    this.geo.instanceCount = n;
   }
 }
 

@@ -24,6 +24,7 @@ import { Hands, type HandState } from './hands.js';
 import { sunCol, DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
 import { type Anchor, scanRoom } from './room.js';
 import { Brood, type ColonySave, type SacSave } from './brood.js';
+import { Bird } from './bird.js';
 import { Drips, makeEnvironment, makeLights, Rain } from './scenery.js';
 import { Spider } from './spider.js';
 import { CAPTURE, DRAG, MOOR, RADIAL, Web } from './web.js';
@@ -42,9 +43,13 @@ type Save = {
   sacs?: SacSave[];
   parcels?: number;
   gravid?: number;
+  rains?: number;
+  birds?: number;
   savedAt: number;
   born?: number;
 };
+
+type FrameAnchor = { pos: Vector3; angle: number; ring: number; tied: boolean };
 
 const clamp = (x: number, a: number, b: number) => (x < a ? a : x > b ? b : x);
 const smooth = (a: number, b: number, x: number) => {
@@ -83,6 +88,7 @@ export class Game {
   private hint2: Mesh;
   private halo: Mesh;
   private star: Mesh;
+  private bird: Bird;
 
   phase: Phase = 'idle';
   private phaseT = 0;
@@ -169,6 +175,7 @@ export class Game {
       onBounce: (f, c) => this.audio.pluck(note(8 + Math.floor(this.web.seed[c] * 5)), 0.05, this.wpos(f.p), 0.6),
     });
     this.brood = new Brood(env);
+    this.bird = new Bird(env);
     this.brood.onHatch = (p) => {
       this.audio.chord([10, 12, 14, 17], 0.05, 5);
       for (let k = 0; k < 6; k++) this.later.push({ t: this.clock + k * 0.18, fn: () => this.audio.pluck(note(15 + k), 0.03, this.wpos(p), 1.2) });
@@ -198,12 +205,24 @@ export class Game {
       this.root.add(m);
       this.sparks.push({ m, life: 0, max: 1, size: 0.01 });
     }
+    const splashMat = spriteMaterial(gt, new Color(0.85, 0.9, 1));
+    for (let k = 0; k < 40; k++) {
+      const m = new Mesh(new PlaneGeometry(1, 1), splashMat);
+      m.renderOrder = 21;
+      m.frustumCulled = false;
+      m.visible = false;
+      this.root.add(m);
+      this.splashes.push({ m, life: 0, max: 1, size: 0.01 });
+    }
+    this.rain.onFloor = (x, y, z) => {
+      if (x * x + z * z < 1.1) this.splash(x, y + 0.002, z, 0.012 + Math.random() * 0.008, 0.28);
+    };
     this.hint = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.hint2 = sprite(gt, new Color(0.95, 0.9, 0.8));
     this.halo = sprite(gt, new Color(1, 0.85, 0.55));
     this.star = sprite(starTexture(), new Color(1, 0.95, 0.88));
 
-    this.root.add(this.silk.mesh, this.drops.mesh, this.spider.root, this.swarm.group, this.brood.group, this.rain.mesh, this.glow, this.hint, this.hint2, this.halo, this.star);
+    this.root.add(this.silk.mesh, this.drops.mesh, this.spider.root, this.swarm.group, this.brood.group, this.bird.group, this.rain.mesh, this.glow, this.hint, this.hint2, this.halo, this.star);
     this.lights = makeLights(this.root);
     this.root.visible = false;
     world.scene.add(this.root, this.dimmer);
@@ -275,6 +294,8 @@ export class Game {
       if (e.key === 'n') this.skip();
       if (e.key === 'e') this.laySac();
       if (e.key === 'h') this.brood.hatchAll();
+      if (e.key === 'b') this.callBird();
+      if (e.key === 'd') this.heavy.push({ x: this.S.x, y: this.ceilY, z: 0, v: 0, r: 0.002, gather: CFG.dropGather, last: -1 });
     });
   }
 
@@ -301,9 +322,10 @@ export class Game {
     }
     if (p === 'frame') {
       this.spider.wave = 1;
-      if (this.desktop) this.buildFrame();
+      if (this.desktop) this.startFrame();
       else this.wantScan = true;
     }
+    if (p === 'spin' && !this.frameClosed) this.closeFrame();
     if (p === 'firstfly') this.spawnFly(true);
     if (p === 'free') {
       this.web.decayOn = true;
@@ -361,7 +383,7 @@ export class Game {
     if (this.wantScan) {
       this.wantScan = false;
       this.scan(frame);
-      if (this.phase === 'frame' && !this.framed) this.buildFrame();
+      if (this.phase === 'frame' && !this.framed) this.startFrame();
     }
   }
 
@@ -412,6 +434,9 @@ export class Game {
       this.floorY = this.save.floorY;
       this.web.floorY = this.floorY;
       this.framed = true;
+      this.frameClosed = true;
+      this.rains = this.save.rains ?? 0;
+      this.birds = this.save.birds ?? 0;
       this.spider.size = this.sizeFor(this.food);
       this.awayFor(hours);
       this.reserve = this.silkCap;
@@ -420,6 +445,7 @@ export class Game {
       this.floorY = -this.root.position.y;
       this.web.floorY = this.floorY;
       this.ceilY = Math.max(1.15, 2.45 + this.floorY);
+      this.spider.size = this.sizeFor(0); // it arrives small
     }
     this.S.set(0, this.ceilY, 0);
     this.Sprev.copy(this.S);
@@ -459,30 +485,138 @@ export class Game {
     if (FLAGS.debug) console.log('[gossamer] room', room);
   }
 
-  /** The frame: lines tied to your room, and a ring the player spins across. */
-  private buildFrame() {
+  /**
+   * The scaffold. The spider hangs at the centre of the frame-to-be, already tied to the ceiling by
+   * its dragline. Swing it out toward a wall, the floor or a piece of furniture and it runs a line
+   * there and comes back: a mooring the whole web will hang from, which nothing ever breaks. When every
+   * side is tied, the ring between them closes and the web proper can begin.
+   */
+  private frameList: FrameAnchor[] = [];
+  private frameClosed = false;
+  private trip: { a: FrameAnchor; t: number; out: number; back: number; from: Vector3; moored: boolean } | null = null;
+  private frameLook: number | null = null;
+
+  private startFrame() {
     if (this.framed) return;
     if (!this.anchors.length) this.scan(null);
     this.framed = true;
-    const w = this.web;
-    const R0 = this.frameR;
     const list = [...this.anchors.map((a) => ({ pos: a.pos.clone(), angle: a.angle })), { pos: new Vector3(0, this.ceilY, 0), angle: Math.PI / 2 }];
     list.sort((a, b) => a.angle - b.angle);
-    const ring: number[] = [];
-    list.forEach((a, k) => {
-      const delay = 0.2 + k * 0.42;
-      const r = w.addP(Math.cos(a.angle) * R0, Math.sin(a.angle) * R0, 0, 1);
-      const pin = w.addP(a.pos.x, a.pos.y, a.pos.z, 0);
-      w.chain(r, pin, MOOR, CFG.baseThick * 1.3, 0.12, 0.96, delay, 0.035);
-      ring.push(r);
-      this.later.push({ t: this.clock + delay, fn: () => this.audio.pluck(note(5 + (k % 5)), 0.12, this.wpos(a.pos.clone().multiplyScalar(0.3)), 2.2) });
-    });
-    const d0 = 0.2 + list.length * 0.42;
-    for (let k = 0; k < ring.length; k++) {
-      w.chain(ring[k], ring[(k + 1) % ring.length], RADIAL, CFG.baseThick * 1.1, CFG.spacing, 0.975, d0 + k * 0.12, 0.02);
+    this.frameList = list.map((a) => ({ ...a, ring: -1, tied: false }));
+    // the ceiling it came down from is tied already
+    const top = this.frameList.find((a) => a.pos.x === 0 && a.pos.y === this.ceilY)!;
+    this.tie(top, false);
+  }
+
+  /** The next mooring to go for: sideways first (a swing side to side), then down, then up. */
+  private frameNext(): FrameAnchor | null {
+    const todo = this.frameList.filter((a) => !a.tied);
+    if (!todo.length) return null;
+    const pref = (a: FrameAnchor) => Math.abs(Math.sin(a.angle)) + (a.pos.y > 0.4 ? 0.5 : 0);
+    todo.sort((a, b) => pref(a) - pref(b));
+    return todo[0];
+  }
+
+  private frameStep(dt: number, t: number) {
+    if (this.trip) return;
+    const next = this.frameNext();
+    if (!next) {
+      this.closeFrame();
+      return;
     }
+    const S = this.S;
+    const r = Math.hypot(S.x, S.y), ang = Math.atan2(S.y, S.x);
+    const adiff = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    // swung out toward an untied side: off it goes
+    let reach: FrameAnchor | null = null;
+    for (const a of this.frameList) {
+      if (a.tied || r < this.frameR * 0.72 || adiff(ang, a.angle) > 0.55) continue;
+      if (!reach || adiff(ang, a.angle) < adiff(ang, reach.angle)) reach = a;
+    }
+    if (reach) return this.tie(reach, true);
+    // the glint: light catches the real surface the next line will tie to, and the spider looks that way
+    this.star.visible = true;
+    this.star.position.copy(next.pos);
+    this.star.scale.setScalar(0.05 + Math.sin(this.clock * 3) * 0.008);
+    this.frameLook = clamp(Math.cos(next.angle) * 0.9, -0.9, 0.9);
+    // if your hand rests, it goes by itself
+    if ((t > 14 && (this.handIdle > 2.5 || this.stillT > 4)) || t > 50) this.tie(next, true);
+  }
+
+  private tie(a: FrameAnchor, trip: boolean) {
+    if (a.tied) return;
+    a.tied = true;
+    if (!trip) return this.moor(a);
+    const from = this.S.clone();
+    const dist = from.distanceTo(a.pos);
+    this.trip = { a, t: 0, out: 0.5 + dist * 0.45, back: 0.45 + dist * 0.38, from, moored: false };
+    this.controls = false;
+    this.spider.wave = 0;
+    this.audio.spinHiss(0.8);
+  }
+
+  /** Spin the mooring: from the real surface back to the ring. */
+  private moor(a: FrameAnchor) {
+    const w = this.web, R0 = this.frameR;
+    // pinned until the ring closes: a half-strung frame must not sag while the rest is tied
+    a.ring = w.addP(Math.cos(a.angle) * R0, Math.sin(a.angle) * R0, 0, 0);
+    const pin = w.addP(a.pos.x, a.pos.y, a.pos.z, 0);
+    w.chain(pin, a.ring, MOOR, CFG.baseThick * 1.3, 0.12, 0.96, 0, 0.03);
+    w.connectivity();
+    this.pulse(a.pos.x, a.pos.y, a.pos.z, 0.03, 0.6);
+    this.audio.pluck(note(5 + (this.frameList.indexOf(a) % 5)), 0.12, this.wpos(a.pos.clone().multiplyScalar(0.3)), 2.2);
+  }
+
+  /** Where the spider is on its trip out to a mooring and back. */
+  private tripStep(dt: number) {
+    const T = this.trip!;
+    T.t += dt;
+    this.Sprev.copy(this.S);
+    if (!T.moored) {
+      const k = smooth(0, 1, T.t / T.out);
+      this.S.lerpVectors(T.from, T.a.pos, k);
+      if (T.t >= T.out) {
+        T.moored = true;
+        T.t = 0;
+        this.moor(T.a);
+      }
+    } else {
+      const w = this.web, r = T.a.ring;
+      const to = this.v1.set(w.p[r * 3], w.p[r * 3 + 1], w.p[r * 3 + 2]);
+      const k = smooth(0, 1, T.t / T.back);
+      this.S.lerpVectors(T.a.pos, to, k);
+      if (T.t >= T.back) {
+        this.trip = null;
+        this.controls = true;
+        this.needNeutral = true;
+        this.T.copy(this.S);
+        this.audio.spinHiss(0);
+        if (!this.frameNext()) this.closeFrame();
+      }
+    }
+    this.P.set(this.S.x, this.S.y + CFG.pendulum, this.S.z);
+  }
+
+  /** Every side tied: the ring between the moorings closes, and the web can begin. */
+  private closeFrame() {
+    if (this.frameClosed) return;
+    if (!this.framed) this.startFrame();
+    this.frameClosed = true;
+    this.trip = null;
+    this.controls = true;
+    for (const a of this.frameList) this.tie(a, false);
+    const w = this.web;
+    const ring = [...this.frameList].sort((a, b) => a.angle - b.angle).map((a) => a.ring);
+    for (let k = 0; k < ring.length; k++) {
+      w.chain(ring[k], ring[(k + 1) % ring.length], RADIAL, CFG.baseThick * 1.1, CFG.spacing, 0.975, 0.2 + k * 0.12, 0.02);
+    }
+    for (const a of this.frameList) w.im[a.ring] = 1; // now the moorings hold it
     w.connectivity();
     this.chooseNest();
+    this.star.visible = false;
+    this.frameLook = null;
+    this.audio.chord([0, 4, 7, 9], 0.06, 5);
+    if (this.phase === 'frame') this.go('spin');
   }
 
   // ---------------------------------------------------------------- helpers
@@ -493,19 +627,20 @@ export class Game {
   }
 
   private sizeFor(food: number) {
-    return 1 + CFG.growMax * (1 - Math.exp(-food / CFG.growK));
+    return CFG.sizeMin + (CFG.sizeMax - CFG.sizeMin) * (1 - Math.exp(-food / CFG.growK));
   }
 
+  /** 0 when it arrives, 1 fully grown. */
   private get grow01() {
-    return clamp((this.spider.size - 1) / CFG.growMax, 0, 1);
+    return clamp((this.spider.size - CFG.sizeMin) / (CFG.sizeMax - CFG.sizeMin), 0, 1);
   }
 
   private persist() {
     if (!this.framed || this.desktop && !FLAGS.debug) return;
-    if (this.phase === 'idle' || this.phase === 'placing' || this.phase === 'intro' && !this.returning) return;
+    if (this.phase === 'idle' || this.phase === 'placing' || this.phase === 'frame' || (this.phase === 'intro' && !this.returning)) return;
     try {
       const s: Save = { web: this.web.serialize(), food: this.food, eaten: this.eaten, ceilY: this.ceilY, floorY: this.floorY, anchorId: this.anchorId, savedAt: Date.now(), born: this.save?.born ?? Date.now(),
-        ...this.brood.save(), gravid: this.gravid, parcels: this.swarm.flies.filter((f) => f.wrapped).length };
+        ...this.brood.save(), gravid: this.gravid, rains: this.rains, birds: this.birds, parcels: this.swarm.flies.filter((f) => f.wrapped).length };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
       this.save = s;
     } catch {}
@@ -528,7 +663,8 @@ export class Game {
     const families = s.colonies?.length ?? 0;
     if (families >= 4) return 'Fill the room.';
     if (families >= 1) return 'Let them go.';
-    if ((s.sacs?.length ?? 0) > 0 || (s.gravid ?? 0) >= 1) return 'Grow a family.';
+    if ((s.sacs?.length ?? 0) > 0 || (s.gravid ?? 0) >= 1 || (s.birds ?? 0) >= 1) return 'Grow a family.';
+    if ((s.rains ?? 0) >= 1) return 'Watch the sky.';
     return 'Maintain a web.';
   }
 
@@ -604,6 +740,9 @@ export class Game {
     this.director(dt);
     this.moveSpider(sdt);
     this.spin(sdt);
+    this.bird.update(sdt);
+    this.sky(sdt);
+    this.heavyRain(sdt);
     const n = sdt > 1 / 70 ? 2 : 1;
     for (let k = 0; k < n; k++) this.web.step(sdt / n);
     this.swarm.update(sdt, this.clock, this.web, this.bounds);
@@ -738,7 +877,11 @@ export class Game {
       // only when you lower your hand does the spider go about its own business
       const goal = this.autoTarget();
       this.auto = !aim && !!goal && this.handIdle > 1.2;
-      if (aim) {
+      if (this.stun > 0) {
+        // knocked off: it hangs low on its dragline until it gathers itself
+        this.stun -= dt;
+        T.set(S.x, Math.max(this.floorY + 0.3, Math.min(S.y, -0.42)), 0);
+      } else if (aim) {
         T.set(aim.x, aim.y, 0);
         // the edge of the web gives like a rubber band: more and more resistance
         const b = this.bounds;
@@ -753,13 +896,15 @@ export class Game {
       } else if (this.auto && goal) T.lerp(goal, 1 - Math.exp(-dt * 1.6));
 
       // the dragline's top lags behind, so the spider leans and sways as it moves...
-      const L = CFG.pendulum;
-      const kP = 1 - Math.exp(-dt * 5);
+      // (while the scaffold is being strung it hangs on a longer line, and really swings)
+      const framing = this.phase === 'frame';
+      const L = CFG.pendulum * (framing ? 1.7 : 1);
+      const kP = 1 - Math.exp(-dt * (framing ? 3.5 : 5));
       P.x += (T.x - P.x) * kP;
       P.y += (T.y + L - P.y) * kP;
       P.z += (T.z - P.z) * kP;
       // ...but it goes where you point, crisply (a critically damped spring)
-      const w = 12 + g01 * 5;
+      const w = this.stun > 0 ? 4.5 : framing ? 7 : 12 + g01 * 5;
       const vx = (S.x - this.Sprev.x) / dt, vy = (S.y - this.Sprev.y) / dt, vz = (S.z - this.Sprev.z) / dt;
       this.Sprev.copy(S);
       const nvx = vx + (w * w * (T.x - S.x) - 2 * w * vx) * dt;
@@ -773,6 +918,7 @@ export class Game {
         if (fixed && Math.random() < dt * 6) this.audio.pluck(note(10 + Math.floor(Math.random() * 5)), 0.012, this.wpos(S), 0.3);
       }
     }
+    if (this.trip) this.tripStep(dt);
     this.spider.size += (this.sizeFor(this.food) - this.spider.size) * (1 - Math.exp(-dt * 1.2));
     const up = this.v2.copy(P).sub(S);
     if (up.lengthSq() < 1e-6) up.set(0, 1, 0);
@@ -785,7 +931,7 @@ export class Game {
    * works too: letting go ties it off. Every pinch does something you can see and hear.
    */
   private spin(dt: number) {
-    const canSpin = this.framed && this.controls && ['frame', 'spin', 'firstfly', 'eat', 'free'].includes(this.phase);
+    const canSpin = this.framed && this.frameClosed && this.controls && this.stun <= 0 && ['spin', 'firstfly', 'eat', 'free'].includes(this.phase);
     const tap = this.tap;
     const w = this.web;
     const s = this.spider.local(this.spider.spinneret, this.v1);
@@ -985,28 +1131,64 @@ export class Game {
     this.rungQueue.push(...rungs);
   }
 
-  /** One turn of sticky spiral at a time, paid for from the silk reserve; it waits when the spider is spent. */
+  /**
+   * One turn of sticky spiral at a time, paid for from the silk reserve, and only where the spider is:
+   * bring it round the web and the spiral follows it. (When your hand rests it goes round by itself.)
+   */
   private laySpiral(dt: number) {
     this.rungClock -= dt;
     if (this.rungClock > 0 || !this.rungQueue.length) return;
     const w = this.web, p = w.p;
-    const [i, j] = this.rungQueue[0];
-    if (!w.pAlive[i] || !w.pAlive[j] || !w.anchored[i] || !w.anchored[j]) {
-      this.rungQueue.shift();
+    const reach = CFG.rungReach + 0.05 * this.spider.size;
+    let at = -1;
+    for (let k = 0; k < this.rungQueue.length; k++) {
+      const [i, j] = this.rungQueue[k];
+      if (!w.pAlive[i] || !w.pAlive[j] || !w.anchored[i] || !w.anchored[j]) {
+        this.rungQueue.splice(k--, 1);
+        continue;
+      }
+      const mx = (p[i * 3] + p[j * 3]) / 2 - this.S.x, my = (p[i * 3 + 1] + p[j * 3 + 1]) / 2 - this.S.y;
+      if (mx * mx + my * my < reach * reach) {
+        at = k;
+        break;
+      }
+    }
+    if (at < 0) {
+      this.rungClock = 0.2;
       return;
     }
+    const [i, j] = this.rungQueue[at];
     const cost = w.dist(i, j) * CFG.captureCost;
     if (this.reserve < cost) {
       this.rungClock = 0.6;
       return;
     }
-    this.rungQueue.shift();
+    this.rungQueue.splice(at, 1);
     this.reserve -= cost;
     const thick = (CFG.baseThick + (CFG.maxThick - CFG.baseThick) * this.grow01) * 0.85;
     w.addC(i, j, CAPTURE, thick, 0.985, 0);
     this.rungClock = CFG.rungEvery;
     this.rungNote = (this.rungNote + 1) % 9;
     this.audio.pluck(note(14 - this.rungNote), 0.022, this.wpos({ x: p[i * 3], y: p[i * 3 + 1], z: p[i * 3 + 2] }), 0.9);
+  }
+
+  /** The turn of spiral waiting nearest the spider, if any. */
+  private nextRung(out: Vector3): Vector3 | null {
+    const w = this.web, p = w.p;
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < this.rungQueue.length; k++) {
+      const [i, j] = this.rungQueue[k];
+      if (!w.pAlive[i] || !w.pAlive[j] || !w.anchored[i] || !w.anchored[j]) continue;
+      const mx = (p[i * 3] + p[j * 3]) / 2, my = (p[i * 3 + 1] + p[j * 3 + 1]) / 2;
+      const d = (mx - this.S.x) ** 2 + (my - this.S.y) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = k;
+      }
+    }
+    if (best < 0) return null;
+    const [i, j] = this.rungQueue[best];
+    return out.set((p[i * 3] + p[j * 3]) / 2, (p[i * 3 + 1] + p[j * 3 + 1]) / 2, (p[i * 3 + 2] + p[j * 3 + 2]) / 2);
   }
 
   // ---------------------------------------------------------------- the beats
@@ -1065,8 +1247,10 @@ export class Game {
         this.hint.scale.setScalar(0.035);
       }
     }
-    if (this.phase === 'frame' && t > 0.6 && !this.framed) this.buildFrame(); // if the room never answered
-    if (this.phase === 'frame' && t > 2.5) this.go('spin');
+    if (this.phase === 'frame') {
+      if (t > 0.6 && !this.framed) this.startFrame(); // if the room never answered
+      if (this.framed) this.frameStep(dt, t);
+    }
     if (this.phase === 'spin') {
       if (this.threadsDone === 0 && t > 3 && !this.live) {
         // breathe the nearest ring point so you see where silk can start
@@ -1079,6 +1263,15 @@ export class Game {
         }
       }
       if (((this.threadsDone >= 2 || this.web.totalLength(CAPTURE) > 0.4) && t > 2 && !this.live) || t > 25) this.go('firstfly');
+    }
+    // early on, a soft point where the next turn of spiral waits for the spider
+    if (this.threadsDone > 0 && this.threadsDone < 4 && !this.live && this.rungQueue.length && !hintOn && this.phase !== 'frame') {
+      const nr = this.nextRung(this.v2);
+      if (nr && nr.distanceTo(this.S) > CFG.rungReach + 0.05 * this.spider.size) {
+        hintOn = true;
+        this.hint.position.set(nr.x, nr.y, nr.z + 0.004);
+        this.hint.scale.setScalar(0.016 + Math.sin(this.clock * 4) * 0.005);
+      }
     }
     if (this.phase === 'firstfly' && t > 28 && !this.swarm.flies.some((f) => f.state === 'stuck')) {
       this.spawnFly(true);
@@ -1108,11 +1301,12 @@ export class Game {
         if (this.desktop) this.scan(null);
         else this.wantScan = true;
       }
-      // flies come for the glints: few at first, more as the web and the spider mature; none in rain
+      // flies come for the glints: few at first, more as the story goes on; none in rain, and a feast
+      // in the sun after it, when the whole web is wet and bright
       this.flyClock -= dt;
-      const maxFlies = this.eaten < 1 ? 1 : this.eaten < 6 ? 2 : 3;
-      if (this.flyClock <= 0 && this.rainI < 0.3) {
-        this.flyClock = rand(...CFG.flyInterval) / (1 + Math.min(1, this.web.totalLength(CAPTURE) * 0.12));
+      const maxFlies = this.eaten < 1 ? 1 : this.rains < 1 ? 2 : this.birds < 1 ? 3 : 4;
+      if (this.flyClock <= 0 && this.rainI < 0.3 && this.birdWarn <= 0 && !this.bird.active) {
+        this.flyClock = rand(...CFG.flyInterval) / (1 + Math.min(1, this.web.totalLength(CAPTURE) * 0.12) + this.afterglow * 1.2);
         if (this.swarm.alive() < maxFlies) {
           // variety grows with the web: moths (slow, worth two, hard on silk), gnat swarms, a rare golden fly
           const r = Math.random();
@@ -1184,9 +1378,178 @@ export class Game {
       }
     }
     if (prey) return lift(prey.p);
+    // a meal for the eggs
+    const sac = this.carry > 0 ? this.brood.sacPos() : null;
+    if (sac) return lift(sac);
     if (this.attention && this.clock - this.attention.t < 3) return this.autoGoal.copy(this.attention.p);
+    // the spiral, a turn at a time
+    if (this.reserve > 0.25 && this.nextRung(this.autoGoal)) return this.autoGoal;
     return null;
   }
+
+  /**
+   * The sky. Once the web is worth raiding, a bird comes gliding through now and then. It calls first,
+   * from off to one side; the spider hears it before you do and holds still. A spider that holds still,
+   * or sits at the edge of its frame, is not seen. One that moves in the open is knocked down.
+   * The bird tears what it passes through, except the moorings.
+   */
+  private birdAt = Infinity;
+  private birdWarn = 0;
+  private birdSide = 1;
+  private birdHit = false;
+  private birdTore = false;
+  private shadow = 0;
+  private stun = 0;
+  private carry = 0;
+  rains = 0;
+  birds = 0;
+
+  private callBird() {
+    if (this.bird.active || this.birdWarn > 0) return;
+    this.birdWarn = CFG.birdWarn;
+    this.birdSide = Math.random() < 0.5 ? -1 : 1;
+    this.birdAt = this.clock + rand(...CFG.birdGap);
+    const far = { x: this.birdSide * 2.6, y: 0.7, z: -1.8 };
+    this.audio.birdCall(this.wpos(far));
+    this.later.push({ t: this.clock + 1.5, fn: () => this.audio.birdCall(this.wpos({ x: this.birdSide * 1.9, y: 0.6, z: -1.5 })) });
+  }
+
+  private sky(dt: number) {
+    const free = this.phase === 'free';
+    if (free && this.birdAt === Infinity && this.eaten >= CFG.birdAfter) this.birdAt = this.clock + (FLAGS.bird || FLAGS.fast ? 6 : 25);
+    if (free && this.rainI < 0.2 && !this.trip && this.clock >= this.birdAt && !this.bird.active && this.birdWarn <= 0) this.callBird();
+    if (this.birdWarn > 0) {
+      this.birdWarn -= dt;
+      if (this.birdWarn <= 0) {
+        this.bird.start(this.birdSide, clamp(this.S.y, -0.16, 0.2));
+        this.audio.whoosh(this.wpos({ x: this.birdSide * 0.8, y: this.S.y + 0.3, z: -0.5 }));
+        this.birdHit = false;
+        this.birdTore = false;
+        for (const f of this.swarm.flies) if (f.state === 'fly') f.leaving = true;
+      }
+    }
+    // alarm: it draws in and freezes, facing the sound
+    const alarmed = this.birdWarn > 0 || this.bird.active;
+    this.spider.alarm += ((alarmed ? 1 : 0) - this.spider.alarm) * (1 - Math.exp(-dt * (alarmed ? 6 : 1.2)));
+    const was = this.birdActive;
+    this.birdActive = this.bird.active;
+    if (was && !this.bird.active) {
+      this.birds++;
+      this.persist();
+      this.audio.chord([2, 7, 9], 0.04, 5, 0.6); // it is gone
+    }
+    this.shadow += ((this.bird.active ? Math.exp(-Math.pow((this.bird.k - 0.5) / 0.22, 2)) : 0) - this.shadow) * (1 - Math.exp(-dt * 14));
+    if (!this.bird.active) return;
+    const b = this.bird.pos, w = this.web;
+    if (Math.abs(b.z) > 0.3) return;
+    // it tears what it flies through (never the moorings)
+    const keep = w.onBreak;
+    w.onBreak = undefined;
+    let torn = 0;
+    for (let c = 0; c < w.nC; c++) {
+      if (!w.cAlive[c] || w.kind[c] === MOOR) continue;
+      const i = w.ca[c] * 3, j = w.cb[c] * 3;
+      const mx = (w.p[i] + w.p[j]) / 2 - b.x, my = (w.p[i + 1] + w.p[j + 1]) / 2 - b.y;
+      if (Math.abs(mx) < 0.07 && Math.abs(my) < 0.055) {
+        w.killC(c);
+        torn++;
+      }
+    }
+    w.onBreak = keep;
+    if (torn) {
+      w.connectivity();
+      if (!this.birdTore) this.audio.noiseBurst(0.14, 2600, 0.14, this.wpos(b));
+      this.birdTore = true;
+    }
+    // the spider: seen only if it moves in the open
+    const S = this.S;
+    const r = Math.hypot(S.x, S.y);
+    const hidden = r > this.frameR * 0.88 || this.stillT > 0.7 || this.stun > 0 || this.handIdle > 0.8;
+    if (!this.birdHit && !hidden && Math.hypot(S.x - b.x, S.y - b.y) < 0.11) {
+      this.birdHit = true;
+      this.knock(1);
+    }
+  }
+  private birdActive = false;
+
+  /** Knocked off: it drops down its dragline, loses what it was carrying, and climbs back. */
+  private knock(k: number) {
+    this.stun = 1.6 + k * 1.4;
+    if (this.live) this.release(new Set(this.live.ids));
+    this.rungClock = Math.max(this.rungClock, 2);
+    this.reserve *= 1 - 0.5 * k;
+    this.food = Math.max(0, this.food - 1.5 * k);
+    this.carry = 0;
+    this.Sprev.y = this.S.y + 0.04; // a jolt downward
+    this.spider.wave = 0;
+    this.audio.thud(this.wpos(this.S));
+    this.audio.chord([0, 1, 5], 0.05 * k + 0.02, 3.5);
+  }
+
+  /**
+   * Rain, heavy: drops gather on the ceiling above the web, swell, and let go. One that lands on a thread
+   * shakes it and can tear it; one that lands on the spider knocks it down. You see them coming.
+   */
+  private heavy: { x: number; y: number; z: number; v: number; r: number; gather: number; last: number }[] = [];
+  private dropClock = 6;
+
+  private heavyRain(dt: number) {
+    if (this.rainI > 0.55 && this.phase === 'free' && !this.trip) {
+      this.dropClock -= dt;
+      if (this.dropClock <= 0) {
+        this.dropClock = rand(...CFG.heavyDropGap) * (this.rains <= 1 ? 1.4 : 1);
+        const b = this.bounds * 0.75;
+        // the roof leaks above where the spider is, more often than not
+        const x = Math.random() < 0.6 ? clamp(this.S.x + rand(-0.06, 0.06), -b, b) : rand(-b, b);
+        this.heavy.push({ x, y: this.ceilY, z: rand(-0.02, 0.02), v: 0, r: 0.002, gather: CFG.dropGather, last: -1 });
+      }
+    }
+    const w = this.web, S = this.S;
+    for (const d of this.heavy) {
+      if (d.gather > 0) {
+        d.gather -= dt;
+        d.r = 0.002 + 0.0062 * smooth(CFG.dropGather, 0, d.gather);
+        d.y = this.ceilY - d.r;
+        if (d.gather <= 0) {
+          this.audio.tick(this.wpos(d), 0.05);
+          this.pulse(d.x, d.y, d.z, 0.03, 0.3);
+        }
+        continue;
+      }
+      d.v = Math.min(CFG.dropFall, d.v + 9.81 * 0.5 * dt);
+      const y0 = d.y;
+      d.y -= d.v * dt;
+      // silk in its way: it loads the thread with water, shakes it, and may tear it
+      const hit = w.nearestC(d.x, (y0 + d.y) / 2, d.z, d.r + 0.004 + (y0 - d.y) * 0.5, (1 << RADIAL) | (1 << CAPTURE));
+      if (hit && hit.c !== d.last) {
+        d.last = hit.c;
+        w.impulse(hit.c, hit.t, 0, -0.004, 0.001);
+        w.hp[hit.c] -= 0.45;
+        w.cwet[hit.c] = 1;
+        w.glint[hit.c] = 1;
+        this.pulse(d.x, d.y, d.z, 0.02, 0.25);
+        this.audio.tick(this.wpos(d), 0.035);
+      }
+      // the spider in its way
+      if (this.stun <= 0 && !this.trip && Math.hypot(d.x - S.x, d.y - S.y, d.z - S.z) < d.r + 0.03 * this.spider.size + 0.012) {
+        this.knock(0.5);
+        d.y = this.floorY - 1;
+      }
+      if (d.y <= this.floorY) this.splash(d.x, this.floorY + 0.002, d.z, 0.035, 0.4);
+    }
+    this.heavy = this.heavy.filter((d) => d.y > this.floorY);
+  }
+
+  /** A fleeting glint on the floor where a drop lands. */
+  private splash(x: number, y: number, z: number, size: number, life: number) {
+    const sp = this.splashes[this.splashNext];
+    this.splashNext = (this.splashNext + 1) % this.splashes.length;
+    sp.m.position.set(x, y, z);
+    sp.life = sp.max = life;
+    sp.size = size;
+  }
+  private splashes: { m: Mesh; life: number; max: number; size: number }[] = [];
+  private splashNext = 0;
 
   /**
    * The spider takes any caught fly the moment it touches it, and binds and eats it while you carry on:
@@ -1234,7 +1597,10 @@ export class Game {
     }
     this.web.glint.fill(0.6);
     this.reserve = Math.min(this.silkCap, this.reserve + 0.6);
-    if (this.brood.pendingSacs() === 0 && this.gravid < 1) {
+    if (this.brood.pendingSacs() > 0) {
+      this.carry = 1; // the next thing it does is take this to its eggs
+    } else if (this.gravid < 1 && (this.birds >= 1 || FLAGS.fast)) {
+      // eggs come late in the story: once the web has weathered rain and been raided and held
       this.gravid = Math.min(1, this.gravid + Math.min(1, f.value) / CFG.mealsPerSac);
       if (this.gravid >= 1) this.chooseNest();
     }
@@ -1309,6 +1675,8 @@ export class Game {
       let want = Math.sin(this.clock * 0.13) * 0.22;
       const prey = this.swarm.flies.find((f) => f.state === 'stuck' && !f.wrapped);
       if (prey) want = clamp((prey.p.x - this.S.x) * 3, -0.9, 0.9);
+      if (this.phase === 'frame' && this.frameLook !== null) want = this.frameLook;
+      if (this.birdWarn > 0 || this.bird.active) want = this.birdSide * 0.85;
       this.twist += (want - this.twist) * (1 - Math.exp(-dt * 2.2));
       this.groomT -= dt;
       const quiet = !this.live && !prey && this.spider.eating < 0.1 && this.stillT > 2.5 && !this.layingSac;
@@ -1440,6 +1808,16 @@ export class Game {
 
   /** Carrying eggs: go to the nest (by itself when your hand rests) and spin the sac there, slowly. */
   private nesting(dt: number) {
+    // a meal for the eggs: the sac grows with each one the spider brings
+    const sac = this.carry > 0 ? this.brood.sacPos() : null;
+    if (sac && sac.distanceTo(this.S) < 0.05 + 0.02 * this.spider.size) {
+      this.carry = 0;
+      this.brood.feed(1 / CFG.sacMeals);
+      this.pulse(sac.x, sac.y, sac.z, 0.03, 0.6);
+      this.audio.chord([4, 7, 11], 0.04, 4);
+      this.laying = Math.max(this.laying, 1.2);
+      this.persist();
+    }
     if (this.gravid < 1 || this.layingSac) {
       if (this.layingSac) {
         this.layingSac -= dt;
@@ -1485,7 +1863,7 @@ export class Game {
     if (sv.colonies) this.brood.restoreColonies(sv.colonies);
     for (const sc of sv.sacs ?? []) {
       const pos = new Vector3().fromArray(sc.p);
-      this.brood.lay(pos, w.nearestP(pos.x, pos.y + 0.011, pos.z, 0.1), sc.age);
+      this.brood.lay(pos, w.nearestP(pos.x, pos.y + 0.011, pos.z, 0.1), sc.age, 1, sc.fed ?? 1);
     }
     if (hours > 0.2) this.brood.passTime(hours);
     // the spider stayed by its hub and kept that part whole
@@ -1501,11 +1879,15 @@ export class Game {
   }
 
   private weather(dt: number) {
-    if (this.phase === 'free' && this.raining <= 0) {
+    if (this.phase === 'free' && this.raining <= 0 && !this.bird.active && this.birdWarn <= 0) {
       this.rainClock -= dt;
-      if (this.rainClock <= 0) {
+      // the first rain waits until there is a web and a few meals to care about (or long enough)
+      const ready = this.rains > 0 || this.eaten >= CFG.rainAfter || this.phaseT > CFG.rainLatest;
+      if (this.rainClock <= 0 && ready) {
         this.raining = CFG.rainLength;
         this.rainClock = rand(...CFG.rainGap);
+        this.rains++;
+        this.dropClock = 9;
       }
     }
     if (this.raining > 0) {
@@ -1550,6 +1932,11 @@ export class Game {
       sp.m.visible = sp.life > 0;
       if (sp.life > 0) sp.m.scale.setScalar(sp.size * Math.sin((sp.life / sp.max) * Math.PI));
     }
+    for (const sp of this.splashes) {
+      sp.life -= dt;
+      sp.m.visible = sp.life > 0;
+      if (sp.life > 0) sp.m.scale.setScalar(sp.size * Math.sin((sp.life / sp.max) * Math.PI));
+    }
   }
 
   // ---------------------------------------------------------------- drawing & sound
@@ -1561,7 +1948,8 @@ export class Game {
     const drift = Math.sin(this.clock * 0.045) * 0.3;
     const sunW = this.v1.set(sunDir.x + drift, sunDir.y - this.afterglow * 0.12, sunDir.z).normalize().applyQuaternion(this.root.quaternion);
     const glow = smooth(0, 0.25, this.afterglow) * this.afterglow;
-    this.silk.uniforms.uBright.value = 1 + glow * 0.5;
+    this.silk.uniforms.uBright.value = (1 + glow * 0.5) * (1 - 0.55 * this.shadow);
+    (this.dimmer.material as unknown as { uniforms: { uFlash: { value: number } } }).uniforms.uFlash.value = -0.22 * this.shadow;
     this.drops.uniforms.uGlow.value = glow;
     this.silk.uniforms.uSun.value.copy(sunW);
     this.rain.setSun(sunW);
@@ -1580,6 +1968,11 @@ export class Game {
     const dthick = CFG.baseThick * (0.9 + this.grow01 * 0.8);
     if (this.phase !== 'placing') this.silk.push(s.x, s.y, s.z, s.x + dir.x * reach, s.y + dir.y * reach, s.z + dir.z * reach, dthick, 1, DRAG + 0.3, 1, 0);
     this.drawNest(dt);
+    // heavy drops: a bead gathering on the ceiling, then a bead with a streak behind it
+    for (const d of this.heavy) {
+      this.drops.push(d.x, d.y, d.z, d.r);
+      if (d.gather <= 0) this.silk.push(d.x, d.y, d.z, d.x, d.y + Math.min(0.08, d.v * 0.04), d.z, d.r * 0.45, 1, DRAG + 0.5, 0.7, 1);
+    }
     pushBeads(w, this.drops, 1 + this.grow01 * 0.4);
     this.drips.update(dt, this.floorY, (x, y, z, r) => this.drops.push(x, y, z, r));
     this.colonyWet = this.rainI > 0.05 ? Math.min(1, this.colonyWet + dt * 0.03) : Math.max(0, this.colonyWet - dt * 0.005);

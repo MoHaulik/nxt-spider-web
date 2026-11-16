@@ -24,11 +24,11 @@ import type { DropMesh, SilkMesh } from './render.js';
 import { CAPTURE, RADIAL } from './web.js';
 
 export type ColonySave = { p: number[]; n: number[]; pop: number; seed: number };
-export type SacSave = { p: number[]; age: number };
+export type SacSave = { p: number[]; age: number; fed?: number };
 
 type Colony = { pos: Vector3; normal: Vector3; pop: number; seed: number; segs: Float32Array; kinds: Uint8Array; r: number; built: number; spots: Vector3[] };
 type Baby = { p: Vector3; from: Vector3; to: Vector3; t: number; dur: number; state: 'ball' | 'fly' | 'home'; colony: Colony | null; jitter: number; ball: Vector3 };
-type Sac = { pos: Vector3; age: number; mesh: Mesh; hatched: boolean; particle: number; grow: number; quiver: number };
+type Sac = { pos: Vector3; age: number; mesh: Mesh; hatched: boolean; particle: number; grow: number; fed: number; quiver: number };
 
 const UP = new Vector3(0, 1, 0);
 
@@ -106,15 +106,40 @@ export class Brood {
 
   // ---------------- egg sacs ----------------
 
-  /** `grow` < 1: the sac is still being spun, and swells to full size over the next seconds. */
-  lay(pos: Vector3, particle: number, age = 0, grow = 1) {
+  /**
+   * `grow` < 1: the sac is still being spun, and swells over the next seconds. `fed` is how much of
+   * its feeding it has had (0..1): a sac only reaches full size, and can only hatch, once the spider
+   * has brought it meals.
+   */
+  lay(pos: Vector3, particle: number, age = 0, grow = 1, fed = 1) {
     const mesh = new Mesh(this.sacGeo, this.sacMat);
     mesh.scale.set(0.0085, 0.011, 0.0085).multiplyScalar(Math.max(0.05, grow));
     mesh.position.copy(pos);
     this.group.add(mesh);
-    const sac = { pos: pos.clone(), age, mesh, hatched: false, particle, grow, quiver: 0 };
+    const sac = { pos: pos.clone(), age, mesh, hatched: false, particle, grow, fed, quiver: 0 };
     this.sacs.push(sac);
     return sac;
+  }
+
+  /** The spider brings a meal to its eggs: the sac grows a little. Returns false if there is no sac. */
+  feed(amount: number) {
+    const s = this.sacs.find((x) => !x.hatched);
+    if (!s) return false;
+    s.fed = Math.min(1, s.fed + amount);
+    s.quiver = 0;
+    return true;
+  }
+
+  /** Where the sac waiting to be fed is, if any. */
+  sacPos(): Vector3 | null {
+    const s = this.sacs.find((x) => !x.hatched);
+    return s ? s.pos : null;
+  }
+
+  /** 0..1, how far the waiting sac is from being able to hatch. */
+  sacFed() {
+    const s = this.sacs.find((x) => !x.hatched);
+    return s ? s.fed : 0;
   }
 
   /** Hatch: a tight ball of spiderlings, which after a breath disperse on the air to the room. */
@@ -216,8 +241,10 @@ export class Brood {
     for (const s of this.sacs) {
       if (s.hatched) continue;
       s.age += dt;
-      if (s.grow < 1) {
-        s.grow = Math.min(1, s.grow + dt / 6);
+      // it swells as it is spun, and then only as it is fed
+      const full = Math.min(1, 0.35 + 0.65 * s.fed);
+      if (s.grow < full) {
+        s.grow = Math.min(full, s.grow + dt / 6);
         const g = s.grow * s.grow * (3 - 2 * s.grow);
         s.mesh.scale.set(0.0085, 0.011, 0.0085).multiplyScalar(Math.max(0.05, g));
       }
@@ -226,7 +253,7 @@ export class Brood {
         s.pos.copy(at).y -= 0.011;
         s.mesh.position.copy(s.pos);
       }
-      if (s.grow >= 1 && s.age >= minAge && (warm || s.quiver > 0)) s.quiver += dt;
+      if (s.grow >= 1 && s.fed >= 1 && s.age >= minAge && (warm || s.quiver > 0)) s.quiver += dt;
       s.mesh.position.x += s.quiver > 0 ? Math.sin(s.age * 40) * 0.0004 * Math.min(1, s.quiver) : 0;
       if (s.quiver > 4) this.hatch(s);
     }
@@ -333,7 +360,7 @@ export class Brood {
   save(): { colonies: ColonySave[]; sacs: SacSave[] } {
     return {
       colonies: this.colonies.map((c) => ({ p: c.pos.toArray().map((x) => +x.toFixed(3)), n: c.normal.toArray().map((x) => +x.toFixed(3)), pop: c.pop, seed: c.seed })),
-      sacs: this.sacs.map((s) => ({ p: s.pos.toArray().map((x) => +x.toFixed(4)), age: s.age })),
+      sacs: this.sacs.map((s) => ({ p: s.pos.toArray().map((x) => +x.toFixed(4)), age: s.age, fed: +s.fed.toFixed(3) })),
     };
   }
 

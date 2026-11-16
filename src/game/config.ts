@@ -5,6 +5,7 @@ const q = new URLSearchParams(location.search);
 export const FLAGS = {
   fast: q.has('fast'), // compress the intro and the weather clock for testing
   rain: q.has('rain'), // start with rain
+  bird: q.has('bird'), // the first bird comes early
   fresh: q.has('fresh'), // ignore any saved web
   debug: q.has('debug'),
   closeup: q.has('closeup'), // desktop preview: camera close to the web
@@ -59,9 +60,11 @@ export const CFG = {
   eatRadius: 0.05,
   eatHold: 0.55,
 
-  // growth: size multiplier is 1 + growMax * (1 - exp(-food / growK))
+  // growth: the spider arrives small and grows with every meal.
+  // size = sizeMin + (sizeMax - sizeMin) * (1 - exp(-food / growK))
   spiderLength: 0.024, // body length at size 1; legs span about 4x this
-  growMax: 1.25,
+  sizeMin: 0.6,
+  sizeMax: 2.1,
   growK: 9,
   hunger: 1 / 600, // food lost per second when you stop eating (slims back down)
 
@@ -71,21 +74,38 @@ export const CFG = {
   silkMax: 4.5,
   silkRegen: 0.016, // metres per second, faster when recently fed
   rungEvery: 0.38, // seconds between turns of the capture spiral
+  rungReach: 0.11, // the spider lays a turn of spiral only where it is (plus a little per size)
   captureCost: 0.5, // sticky silk per metre laid
   wrapTime: 1.6, // seconds to bind a fly (each tap is a turn)
   mealsPerSac: 4,
+  sacMeals: 3, // meals carried to a laid sac before it can hatch
   sacMinAge: 75, // seconds before a sac can hatch (then it waits for sun after rain)
   idleTakeover: 2.2, // seconds of a still or absent hand before the spider acts on its own
 
+  // the arc of a session: what each chapter waits for
+  rainAfter: 3, // meals before the first rain can come
+  rainLatest: 240, // ...or this many seconds of free play
+  birdAfter: 7, // meals before the first bird (it needs a web worth raiding)
+  birdGap: [150, 260] as [number, number],
+  birdWarn: 3.4, // seconds between the first call and the pass
+  heavyDropGap: [3.2, 5.6] as [number, number], // seconds between drops gathering on the ceiling in rain
+  dropGather: 1.7, // seconds a drop swells on the ceiling before it lets go
+  dropFall: 1.7, // metres per second, slow enough to see coming
+
   // weather
-  firstRain: 125, // seconds into free play
+  firstRain: 125, // seconds into free play (the first rain also waits for `rainAfter` meals)
   rainLength: 75,
   rainGap: [200, 320] as [number, number],
 };
 
 if (FLAGS.fast) {
   CFG.firstRain = 25;
+  CFG.rainLatest = 40;
+  CFG.rainAfter = 1;
+  CFG.birdAfter = 2;
+  CFG.birdGap = [40, 70];
   CFG.sacMinAge = 12;
   CFG.mealsPerSac = 2;
+  CFG.sacMeals = 1;
   CFG.rainGap = [40, 60];
 }

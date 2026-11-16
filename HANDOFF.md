@@ -6,6 +6,8 @@ You are picking up **Gossamer**, a hands-first mixed-reality game for Meta Quest
 - Page and rules: https://start-developer-competition-26.devpost.com (rules: https://start-developer-competition-26.devpost.com/rules)
 - **Deadline: Wednesday 18 November 2026, 12:00 PM PST (21:00 Danish time).** No changes are allowed after it. Aim to submit the evening before.
 - **Entry:** Gaming track, **New Experience** division. This category requires the project to be conceived and built inside the window that began 24 Sep 2026. The repo history starts 6 Nov 2026. Do **not** copy code or assets from other repos (especially `nxt-thing-hand` / *die Hände*).
+- **One entry per person.** The official rules (section "Entry Limit") allow each individual exactly one Entry, whether solo or as a team representative. A second game can only be entered by a different person (or a team with a different representative). Being a non-representative member of other teams is allowed.
+- **Stage one is pass/fail** (fits the theme, uses hands, passthrough, scene understanding); stage two is the four 25% criteria below. Entries must stay available and unchanged until the winner announcement (around 11 Dec 2026).
 - **Hard requirement: hands-first.** The whole experience must be playable with hands only, with no controller ever paired.
 - **Guidelines:**
   - Seated, with every interaction within a 2 ft radius.
@@ -31,28 +33,33 @@ You are picking up **Gossamer**, a hands-first mixed-reality game for Meta Quest
 - Desktop preview keys: `f` fly, `r` rain, `n` next beat, `e` eggs, `h` hatch.
 
 ## What it is
-A spider descends from your real ceiling on a single thread.
-- **Steering:** you point (a ray from your shoulder through your hand) and it goes there.
-- **Spinning:** a tap of the fingers starts a thread, and the next tap ties it off. Threads crossing the middle become radii through a hub, and the spider lays the sticky spiral itself.
-- **Silk:** a resource, refilled by meals.
-- **Prey:** flies, moths and gnats are caught by the web. Touching one with the spider eats it.
-- **Eggs:** a visible nest fills with each meal, then the spider lays an egg sac. It hatches when the sun returns after rain. Spiderlings balloon to real surfaces (found through WebXR plane detection) and build small webs that persist and grow between sessions.
-- **The room:** frame lines tie to the real floor, walls and ceiling. Real time of day sets the light (dew in the morning).
-- **Sound:** everything is procedural and synthesized, including a generative score.
+A spider descends from your real ceiling on a single thread, small, and grows as it eats. The session is a story with a curve:
+1. **The scaffold (intro).** Swing the spider with your hand, side to side. Where it swings out toward an untied side (a real wall, the floor, furniture, the ceiling it came from), it runs a mooring line there and back. A glint on the real surface shows the next one; the spider looks that way. When every side is tied the ring closes. Moorings (`MOOR`) never decay and the bird never cuts them.
+2. **Spinning.** A tap of the fingers starts a thread, the next tap ties it off (holding the pinch works too). Threads across the middle become radii through a hub. The sticky spiral is laid a turn at a time **only where the spider is** (`CFG.rungReach`), so the player sweeps the spider round the web; with the hand at rest the spider goes round by itself.
+3. **Flies, meals, growth.** Size goes from `CFG.sizeMin` (0.6) to `CFG.sizeMax` (2.1) with food.
+4. **Rain** (after `rainAfter` meals or `rainLatest` seconds): the new rain has depth (instanced ribbon drops with bright heads, falling around and in front of the player, splashing on the floor). Heavy drops gather on the ceiling, swell for `dropGather` seconds and fall: a thread hit tears, a spider hit knocks it down its dragline (`knock`). Sun afterwards: a feast of flies, and the wet web to repair.
+5. **The bird** (after `birdAfter` meals, then every `birdGap`): two calls from one side, the spider freezes (`spider.alarm`), the bird glides through the web plane and tears what it crosses. Safe if still, at the frame edge, or with the hand lowered; otherwise knocked down.
+6. **Eggs** (only once a bird has passed): the nest fills with meals, a sac is spun, and each following meal is carried to the sac (`carry`, `brood.feed`). Fed (`CFG.sacMeals`) and warmed by sun after rain, it hatches; spiderlings balloon to real surfaces (plane detection) and build small webs that persist.
+- **Steering:** a ray from your shoulder through your hand. **No line from the hand to the spider.**
+- **The room:** moorings tie to the real floor, walls and ceiling. Real time of day sets the light.
+- **Sound:** everything is procedural, including the bird's call, its wings, the thud, and a generative score.
 
 Stack: IWSDK 1.1.0-rc.2 (three.js r185), TypeScript, Vite. Code is in `src/game/`; all tuning is in `src/game/config.ts`.
 
 ## Art direction rules from the owner (Morten)
 - **No text or UI in the world, ever.** It's art, like Limbo.
 - The landing page is the title, one chapter line ("Build a home." / "Maintain a web." / "Grow a family." / "Let them go." / "Fill the room.") and "enter".
-- The spider must never look like a tick: long banded legs, a dark glossy two-part body.
+- The spider must never look like a tick: long banded legs, a clear two-part body.
+- The spider must not look scary either: think a Pixar house spider, still realistic. Warm velvety brown, rounded, small eyes (no big cartoon eyes), no fangs, no hair, no spike, slow unhurried motion. It starts small and grows.
+- Things should happen: a curve of events (build, eat, rain, dodge drops, sun, repair, feast, bird, eggs), not everything at once. Babies come late.
+- The player must feel they make the web themselves (the spider does craft, the player does the choosing and the sweeping).
 - No line from the hand to the spider.
 - The bar is Steve Jobs-level attention to interaction detail.
 
 ## Status and next steps
-- **Latest playtest feedback:** hard to control, unclear when you can spin, needs purpose, gets boring. The latest build addresses all four, but it **has not yet been tested on a headset**. Get feedback from the owner first.
+- **16 Nov 2026 (this session):** rebuilt around the owner's feedback: friendlier, smaller-then-growing spider; the swing-to-scaffold intro; the spiral laid where the spider is; rain with depth and heavy drops to dodge; the bird; eggs moved to the end of the arc and fed by meals. Verified in the desktop preview (`?desktop&fast&fresh`), typechecked and built. **Not yet tested on a headset.** Branch `feat/arc-intro-spider`, deployed to GitHub Pages from that branch.
 - **Remaining:**
-  - Verify on Quest 3 at 60 fps or better.
+  - Headset test on Quest 3: the swing-to-scaffold feel (trigger radius `frameR * 0.72`, angular window 0.55 rad in `frameStep`), the spiral reach, the heavy-drop dodge, the bird's hit box (0.11) and whether the "hold still" rule reads. Verify 60 fps or better (the rain is now 700 instanced quads; `Rain.N`).
   - Record the gameplay video under 3 minutes (shot list in `SUBMISSION.md`).
   - Fill in the Devpost form from `SUBMISSION.md`, including the [bracketed] items.
-  - Submit before the deadline.
+  - Submit before the deadline (aim for the evening of 17 Nov).

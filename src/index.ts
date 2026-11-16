@@ -10,7 +10,8 @@ World.create($('scene-container') as HTMLDivElement, projectOptions).then(async 
   const enter = $('enter') as HTMLButtonElement;
   const preview = $('preview') as HTMLButtonElement;
   const fresh = $('fresh') as HTMLButtonElement;
-  const ar = !!navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false));
+  // ?desktop forces the mouse preview even where an XR emulator is present
+  const ar = !new URLSearchParams(location.search).has('desktop') && !!navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false));
 
   // one line: where you are in the story
   $('line').textContent = Game.chapter();
