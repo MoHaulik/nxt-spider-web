@@ -57,7 +57,7 @@ Stack: IWSDK 1.1.0-rc.2 (three.js r185), TypeScript, Vite. Code is in `src/game/
 - The bar is Steve Jobs-level attention to interaction detail.
 
 ## Status and next steps
-- **16 Nov 2026 (this session):** rebuilt around the owner's feedback: friendlier, smaller-then-growing spider; the swing-to-scaffold intro; the spiral laid where the spider is; rain with depth and heavy drops to dodge; the bird; eggs moved to the end of the arc and fed by meals. Verified in the desktop preview (`?desktop&fast&fresh`), typechecked and built. **Not yet tested on a headset.** Branch `feat/arc-intro-spider`, deployed to GitHub Pages from that branch.
+- **16 Nov 2026 (this session):** rebuilt around the owner's feedback: friendlier, smaller-then-growing spider; the swing-to-scaffold intro; the spiral laid where the spider is; rain with depth and heavy drops to dodge; the bird; eggs moved to the end of the arc and fed by meals. Verified in the desktop preview (`?desktop&fast&fresh`), typechecked and built. **Not yet tested on a headset.** Merged into `main` and deployed to GitHub Pages (commit 083198b).
 - **Remaining:**
   - Headset test on Quest 3: the swing-to-scaffold feel (trigger radius `frameR * 0.72`, angular window 0.55 rad in `frameStep`), the spiral reach, the heavy-drop dodge, the bird's hit box (0.11) and whether the "hold still" rule reads. Verify 60 fps or better (the rain is now 700 instanced quads; `Rain.N`).
   - Record the gameplay video under 3 minutes (shot list in `SUBMISSION.md`).
