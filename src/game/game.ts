@@ -20,6 +20,7 @@ import { Audio, note, type Voice } from './audio.js';
 import { CFG, FLAGS } from './config.js';
 import { type Fly, type FlyKind, Swarm } from './flies.js';
 import { OneEuro3 } from './filter.js';
+import { FpsMeter } from './fps.js';
 import { Hands, type HandState } from './hands.js';
 import { sunCol, DropMesh, glowTexture, makeDimmer, pushBeads, SilkMesh, spriteMaterial, starTexture, sunDir, fillDir } from './render.js';
 import { type Anchor, scanRoom } from './room.js';
@@ -743,6 +744,7 @@ export class Game {
     }
     if (!slow && !easy) this.guardT = 0;
   }
+  private fps = FLAGS.fps ? new FpsMeter() : null;
   private lastFrameAt = 0;
   private frameMs = 13.9;
   private guardT = 0;
@@ -750,9 +752,14 @@ export class Game {
 
   private step(dtRaw: number) {
     this.guard();
+    if (this.fps) {
+      this.fps.attach(this.world.session ? this.world.player.head : this.world.camera);
+      this.fps.tick(this.quality, `${this.phase}  silk ${this.web.nC}  dew ${this.drops.n}  flies ${this.swarm.flies.length}  ${this.world.session ? 'XR' : 'desktop'}`);
+    }
     if (this.phase === 'idle' || this.paused) return;
     const dt = Math.min(dtRaw, 1 / 30);
     this.clock += dt;
+    this.lastDt = dt;
     this.phaseT += dt;
     if (this.slowmo > 0) this.slowmo -= dt;
     this.timeScale += ((this.slowmo > 0 ? 0.3 : 1) - this.timeScale) * (1 - Math.exp(-dt * 6));
@@ -810,7 +817,7 @@ export class Game {
     if (this.hideClock > 0) return;
     this.hideClock = 0.1;
     this.world.player.traverse((o: Object3D) => {
-      if (o === this.hands.occluder) return;
+      if (o === this.hands.occluder || o === this.fps?.mesh) return;
       if ((o as Mesh).isMesh || (o as unknown as { isLine?: boolean }).isLine) o.visible = false;
     });
   }
@@ -837,21 +844,37 @@ export class Game {
       return;
     }
     const L = this.hands.left, R = this.hands.right;
-    // only a hand raised in front of you takes part; a hand resting in your lap is resting
+    // A hand takes part only when it is raised and pointing at the web. Seated, a hand resting in your lap
+    // is barely lower than a raised one, but it points at the floor, so it rests.
     const fh = this.v2.set(this.fwd.x, 0, this.fwd.z);
     if (fh.lengthSq() < 1e-4) fh.set(0, 0, -1);
     fh.normalize();
+    const b = this.bounds;
     for (const h of [L, R]) {
+      const m = h === L ? this.motionL : this.motionR;
+      const lp = h === L ? this.lastPosL : this.lastPosR;
       if (!h.seen) {
         h.engaged = false;
+        m.v = 0;
         continue;
       }
-      const w = this.v3.copy(h.pos).applyMatrix4(this.world.player.matrixWorld).sub(this.head);
+      const w = this.v3.copy(h.pos).applyMatrix4(this.world.player.matrixWorld);
+      m.v += (Math.min(2, w.distanceTo(lp) / Math.max(1e-3, this.lastDt)) - m.v) * 0.2;
+      lp.copy(w);
+      w.sub(this.head);
       const f = w.dot(fh), y = w.y;
-      h.engaged = h.engaged ? f > 0.02 && y > -0.78 : f > 0.06 && y > -0.7;
+      const aim = this.aimFrom(h, h === L ? this.aimL : this.aimR);
+      const r = aim ? Math.hypot(aim.x, aim.y) : Infinity;
+      h.engaged = h.engaged ? f > 0.02 && y > -0.62 && r < b * 2.4 : f > 0.06 && y > -0.55 && r < b * 1.8;
     }
-    // the steering hand is sticky; the other hand's taps spin without taking the spider away
+    // the steering hand is sticky, and the other hand's taps spin without taking the spider away;
+    // but if the steering hand is still and the other one clearly moves, the moving hand takes over
     let a = this.active && this.active.engaged ? this.active : R.engaged ? R : L.engaged ? L : null;
+    if (a && L.engaged && R.engaged) {
+      const other = a === L ? R : L;
+      const ma = a === L ? this.motionL : this.motionR, mo = other === L ? this.motionL : this.motionR;
+      if (mo.v > 0.25 && ma.v < 0.08 && !this.live) a = other;
+    }
     if (a !== this.active) {
       this.needNeutral = true;
       this.handFilter.reset();
@@ -862,6 +885,13 @@ export class Game {
     this.tap = L.engaged && L.down ? L : R.engaged && R.down ? R : null;
   }
   private tap: HandState | null = null;
+  private motionL = { v: 0 };
+  private motionR = { v: 0 };
+  private lastPosL = new Vector3();
+  private lastPosR = new Vector3();
+  private aimL = new Vector3();
+  private aimR = new Vector3();
+  private lastDt = 1 / 72;
   private spinHand: HandState | null = null;
   private lastEngaged = -10;
   private handFilter = new OneEuro3(1.1, 2.4, 1.0);
@@ -1321,6 +1351,8 @@ export class Game {
       this.spawnFly(true);
       this.phaseT = 0;
     }
+    // the first fly tore free before it was eaten: never leave the player waiting, send another
+    if (this.phase === 'eat' && t > 2 && !this.eatingList.length && !this.swarm.flies.some((f) => f.state === 'stuck')) this.go('firstfly');
     // the pinch cue: two soft points at your fingertips that close together, once, before your first thread
     const h2 = this.active;
     const pinchCue = this.phase === 'spin' && this.threadsDone === 0 && !this.live && t > 2 && !!h2?.seen && !this.desktop;
@@ -1407,6 +1439,12 @@ export class Game {
 
   /** What the spider does by itself when your hand rests: lay eggs, take prey, eat its store, look into a pluck. */
   private autoTarget(): Vector3 | null {
+    const g = this.autoTargetRaw();
+    // never wander off the web on its own (to silk or prey that fell with a torn thread, say)
+    return g && Math.hypot(g.x, g.y) <= this.bounds * 1.25 && g.y > this.floorY + 0.25 ? g : null;
+  }
+
+  private autoTargetRaw(): Vector3 | null {
     const lift = (v: Vector3) => this.autoGoal.copy(v).add(this.v2.set(0, 0.46 * this.spider.scaleM, 0));
     if (this.gravid >= 1 && this.nest >= 0 && this.web.pAlive[this.nest]) {
       const p = this.web.p;

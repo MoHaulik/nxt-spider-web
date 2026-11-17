@@ -8,6 +8,7 @@ export const FLAGS = {
   bird: q.has('bird'), // the first bird comes early
   fresh: q.has('fresh'), // ignore any saved web
   debug: q.has('debug'),
+  fps: q.has('fps'), // frame-rate readout below your line of sight, for headset testing
   closeup: q.has('closeup'), // desktop preview: camera close to the web
   bot: q.has('bot'), // desktop preview: a hand that plays by itself
 };
