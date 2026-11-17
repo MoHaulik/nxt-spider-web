@@ -64,3 +64,5 @@ Stack: IWSDK 1.1.0-rc.2 (three.js r185), TypeScript, Vite. Code is in `src/game/
   - Record the gameplay video under 3 minutes (shot list in `SUBMISSION.md`).
   - Fill in the Devpost form from `SUBMISSION.md`, including the [bracketed] items.
   - Submit before the deadline (aim for the evening of 17 Nov).
+
+- **17 Nov 2026:** `?fps` readout for headset testing; hand engagement fix (a hand resting in a seated lap used to steal the steering); recovery if the first fly escapes before it is eaten (the game used to wait forever); the spider never wanders off the web on its own. Verified with a full scripted playthrough in the IWSDK Quest 3 emulator through IWER's remote API (`IWER_DEVICE.remote.dispatch`): scaffold, threads, meals, nest, sac, bird x2, rain, hatching, families, no errors. A silent backup video from that emulator run is in `../gossamer-submission/`. Paste-ready form text: `DEVPOST_FORM.md`. **Still not tested on a real headset; fps on Quest still unmeasured.**
