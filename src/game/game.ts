@@ -920,7 +920,12 @@ export class Game {
       const ma = a === L ? this.motionL : this.motionR, mo = other === L ? this.motionL : this.motionR;
       // a hand stretched far out is reaching to touch (poke, pluck, shoo), not taking the steering
       const reaching = (other === L ? this.reachL : this.reachR) > 0.42;
-      if (mo.v > 0.25 && ma.v < 0.08 && !this.live && !reaching) a = other;
+      // and it has to keep at it for a third of a second: a quick reach out to poke never takes the spider
+      this.takeT = mo.v > 0.25 && ma.v < 0.08 && !this.live && !reaching ? this.takeT + this.lastDt : 0;
+      if (this.takeT > 0.33) {
+        a = other;
+        this.takeT = 0;
+      }
     }
     if (a !== this.active) {
       this.needNeutral = true;
@@ -957,6 +962,7 @@ export class Game {
   }
   private flyHands = Array.from({ length: 4 }, (_, i) => ({ p: new Vector3(), v: new Vector3(), has: false, tip: i % 2 === 1, still: 0 }));
   private tap: HandState | null = null;
+  private takeT = 0;
   private reachL = 0;
   private reachR = 0;
   private motionL = { v: 0 };
@@ -1939,7 +1945,8 @@ export class Game {
         const ray = this.v3.copy(tip).sub(eye);
         const reach = ray.length();
         const along = vel.dot(ray) / Math.max(reach, 1e-3);
-        if (reach > 0.3 && along > 0.25 && tip.z > 0 && eye.z > tip.z) {
+        // only an arm stretched out to jab counts; a steering hand moving forward is not a touch
+        if (reach > 0.42 && along > 0.25 && tip.z > 0 && eye.z > tip.z) {
           at = this.touchAt.copy(eye).addScaledVector(ray, eye.z / (eye.z - tip.z));
           far = true;
         }
@@ -2043,6 +2050,16 @@ export class Game {
         best = i;
       }
     }
+    // never without a place: failing a strong junction, the highest point of the web that holds
+    if (best < 0) {
+      for (let i = 0; i < w.nP; i++) {
+        if (!w.pAlive[i] || !w.anchored[i] || Math.hypot(p[i * 3], p[i * 3 + 1]) > this.frameR * 1.3) continue;
+        if (p[i * 3 + 1] > by) {
+          by = p[i * 3 + 1];
+          best = i;
+        }
+      }
+    }
     this.nest = best;
     this.gravidT = 0;
   }
@@ -2053,26 +2070,41 @@ export class Game {
    */
   private drawNest(dt: number) {
     const w = this.web, p = w.p, n = this.nest;
-    const show = n >= 0 && !!w.pAlive[n] && this.framed;
-    this.nestMesh.visible = show;
-    this.nestGlow.visible = show && this.gravid > 0.05;
-    if (!show) return;
-    const g = this.layingSac ? 0 : this.gravid;
-    this.nestFill += (g - this.nestFill) * (1 - Math.exp(-dt * 2));
-    const f = this.nestFill;
+    this.nestMesh.visible = false; // no egg-like shape before there are eggs
+    const ready = this.gravid >= 1 && !this.layingSac;
+    const show = n >= 0 && !!w.pAlive[n] && this.framed && (ready || this.layingSac > 0);
+    this.nestGlow.visible = show && ready;
+    if (!show) {
+      this.nestCalled = false;
+      return;
+    }
     const x = p[n * 3], y = p[n * 3 + 1] - 0.012, z = p[n * 3 + 2];
-    this.nestMesh.position.set(x, y, z);
-    this.nestMesh.scale.set(0.011 + 0.01 * f, 0.008 + 0.008 * f, 0.007 + 0.005 * f);
-    this.nestGlow.position.set(x, y, z + 0.006);
-    this.nestGlow.scale.setScalar(0.03 + 0.03 * f + Math.sin(this.clock * 2) * 0.003 * f);
-    (this.nestGlow.material as unknown as { uniforms: { uOpacity: { value: number } } }).uniforms.uOpacity.value = 0.25 + 0.6 * f;
-    // the retreat's own threads: more of them as it fills
-    const strands = 4 + Math.floor(f * 8);
-    for (let k = 0; k < strands; k++) {
-      const a = k * 2.4 + 0.3, r = 0.02 + 0.012 * ((k * 7) % 3);
-      this.silk.push(x, y, z, x + Math.cos(a) * r, y + Math.sin(a) * r * 0.8 + 0.006, z - 0.003, 0.00018, 1, RADIAL + 0.2 * f, 0.55 + 0.45 * f, 0);
+    if (ready) {
+      // the eggs are due: a place at the top of the frame lights up and calls, until the spider gets there
+      if (!this.nestCalled) {
+        this.nestCalled = true;
+        this.audio.chime(note(14), 0.07, this.wpos({ x, y, z }));
+        this.pulse(x, y, z, 0.06, 1.2);
+      }
+      const beat = 0.5 + 0.5 * Math.sin(this.clock * 3.2);
+      this.nestGlow.position.set(x, y, z + 0.006);
+      this.nestGlow.scale.setScalar(0.07 + 0.035 * beat);
+      (this.nestGlow.material as unknown as { uniforms: { uOpacity: { value: number } } }).uniforms.uOpacity.value = 0.55 + 0.35 * beat;
+      this.star.visible = true;
+      this.star.position.set(x, y, z + 0.008);
+      this.star.scale.setScalar(0.05 + 0.018 * beat);
+    } else {
+      // laying: turn after turn of silk is drawn round the growing sac
+      const k = 1 - this.layingSac / CFG.layTime;
+      const turns = Math.floor(3 + k * 14);
+      const sy = y - 0.011;
+      for (let i = 0; i < turns; i++) {
+        const a0 = i * 2.39, a1 = a0 + 2.1, r = 0.006 + 0.007 * k;
+        this.silk.push(x + Math.cos(a0) * r, sy + Math.sin(a0) * r * 1.3, z + 0.002, x + Math.cos(a1) * r, sy + Math.sin(a1) * r * 1.3, z - 0.002, 0.00012, 1, RADIAL + 0.5, 0.8, 0);
+      }
     }
   }
+  private nestCalled = false;
   private nestFill = 0;
 
   /** Carrying eggs: go to the nest (by itself when your hand rests) and spin the sac there, slowly. */
@@ -2092,7 +2124,7 @@ export class Game {
       if (this.layingSac) {
         this.layingSac -= dt;
         this.laying = Math.max(this.laying, 0.2);
-        this.gravid = Math.max(0, this.gravid - dt / 6);
+        this.gravid = Math.max(0, this.gravid - dt / CFG.layTime);
         if (this.layingSac <= 0) {
           this.layingSac = 0;
           this.gravid = 0;
@@ -2113,7 +2145,8 @@ export class Game {
     // if you keep it busy for a long time, it lays where it is
     if (at < 0 && this.gravidT > 45) at = w.nearestP(this.S.x, this.S.y, this.S.z, 0.2);
     if (at < 0) return;
-    this.layingSac = 6;
+    this.layingSac = CFG.layTime;
+    this.nestCalled = false;
     this.brood.lay(new Vector3(p[at * 3], p[at * 3 + 1] - 0.011, p[at * 3 + 2]), at, 0, 0.02);
     this.audio.chord([0, 2, 7], 0.04, 6);
     this.audio.pluck(note(9), 0.05, this.wpos(this.S), 2.5);

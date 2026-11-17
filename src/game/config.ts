@@ -79,6 +79,7 @@ export const CFG = {
   captureCost: 0.5, // sticky silk per metre laid
   wrapTime: 1.6, // seconds to bind a fly (each tap is a turn)
   mealsPerSac: 3,
+  layTime: 5, // seconds the spider takes to lay and wrap its eggs at the lit place
   sacMeals: 2, // meals carried to a laid sac before it can hatch
   sacMinAge: 75, // seconds before a sac can hatch (then it waits for sun after rain)
   idleTakeover: 2.2, // seconds of a still or absent hand before the spider acts on its own

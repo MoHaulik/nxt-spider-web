@@ -244,7 +244,7 @@ export class Brood {
       // it swells as it is spun, and then only as it is fed
       const full = Math.min(1, 0.35 + 0.65 * s.fed);
       if (s.grow < full) {
-        s.grow = Math.min(full, s.grow + dt / 6);
+        s.grow = Math.min(full, s.grow + dt / 5); // in step with CFG.layTime
         const g = s.grow * s.grow * (3 - 2 * s.grow);
         s.mesh.scale.set(0.0085, 0.011, 0.0085).multiplyScalar(Math.max(0.05, g));
       }

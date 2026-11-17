@@ -364,6 +364,7 @@ export class Swarm {
             const k = web.kind[hit.c];
             const p = f.sure ? 1 : (k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08) * (f.kind === 'moth' ? 0.8 : 1); // the first fly always sticks
             if (Math.random() < p) {
+              if (f.handSure) f.sure = f.handSure = false; // released by your hand: an ordinary catch from here
               f.state = 'stuck';
               f.stuckC = hit.c;
               f.stuckT = hit.t;
