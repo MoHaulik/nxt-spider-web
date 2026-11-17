@@ -6,7 +6,7 @@ import { Matrix4, Vector3 } from '@iwsdk/core';
 
 export type Anchor = { pos: Vector3; label: string; angle: number };
 export type Site = { pos: Vector3; normal: Vector3; label: string };
-export type Room = { ceilY: number; floorY: number; anchors: Anchor[]; planes: number; sites: Site[] };
+export type Room = { ceilY: number; floorY: number; anchors: Anchor[]; planes: number; sites: Site[]; blocked: number | null };
 
 type P = { m: Matrix4; inv: Matrix4; n: Vector3; o: Vector3; poly: { x: number; z: number }[]; label: string; horizontal: boolean };
 
@@ -20,7 +20,7 @@ function inPoly(x: number, z: number, poly: { x: number; z: number }[]) {
 }
 
 /** `toLocal` maps world (reference space) into the web frame. `floorLocalY` is where y=0 lands. */
-export function scanRoom(frame: XRFrame | null, ref: XRReferenceSpace | null, toLocal: Matrix4, floorLocalY: number): Room {
+export function scanRoom(frame: XRFrame | null, ref: XRReferenceSpace | null, toLocal: Matrix4, floorLocalY: number, eye?: Vector3): Room {
   const planes: P[] = [];
   const set = (frame as unknown as { detectedPlanes?: Set<XRPlane> })?.detectedPlanes;
   if (frame && ref && set) {
@@ -110,5 +110,12 @@ export function scanRoom(frame: XRFrame | null, ref: XRReferenceSpace | null, to
   // walls and furniture make the best nests: sort them first, then floor, then ceiling
   const rank = (s: Site) => (Math.abs(s.normal.y) < 0.5 ? 0 : s.normal.y > 0 && s.label !== 'floor' ? 0.5 : s.label === 'floor' ? 1 : 1.5);
   sites.sort((a, b) => rank(a) - rank(b) || Math.random() - 0.5);
-  return { ceilY, floorY, anchors: picked, planes: planes.length, sites };
+  // a real surface between your eyes and the web (a desk facing a wall): how far from the eye it is
+  let blocked: number | null = null;
+  if (eye) {
+    const dist = eye.length();
+    const hit = cast(eye.clone().negate().normalize(), dist + 0.05, eye);
+    if (hit && hit.t < dist - 0.03) blocked = hit.t;
+  }
+  return { ceilY, floorY, anchors: picked, planes: planes.length, sites, blocked };
 }

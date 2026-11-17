@@ -398,6 +398,7 @@ export class Game {
   }
 
   private anchorId?: string = this.save?.anchorId;
+  private movedForWall = false;
   private captureState: 'wait' | 'asked' | 'done' = 'wait';
   private planesSeen = 0;
 
@@ -515,16 +516,34 @@ export class Game {
     this.world.scene.background = on ? new Color(0.09, 0.075, 0.062) : null;
   }
 
-  private scan(frame: XRFrame | null) {
+  private scan(frame: XRFrame | null): void {
     this.root.updateMatrixWorld(true);
     this.toLocal.copy(this.root.matrixWorld).invert();
     const floorLocal = -this.root.position.y;
     let room;
     try {
-      room = scanRoom(frame, this.ref, this.toLocal.clone().multiply(this.world.player.matrixWorld), floorLocal);
+      room = scanRoom(frame, this.ref, this.toLocal.clone().multiply(this.world.player.matrixWorld), floorLocal, this.head.clone().applyMatrix4(this.toLocal));
     } catch (e) {
       console.warn('[gossamer] room scan failed, using the floor', e);
       room = scanRoom(null, null, this.toLocal, floorLocal);
+    }
+    // a desk facing a wall: the web would hang inside it. Bring it in front of the surface, once, before
+    // the frame is tied (the anchor, if already made, is made again at the new place).
+    if (room.blocked !== null && !this.framed && !this.save && !this.movedForWall && frame) {
+      this.movedForWall = true;
+      const f = this.v1.copy(this.root.position).sub(this.head).setY(0);
+      const flat = f.length() || 1;
+      const nd = clamp(room.blocked * (flat / Math.max(flat, this.head.distanceTo(this.root.position))) - 0.12, 0.42, CFG.webDistance);
+      f.normalize();
+      const y = this.root.position.y;
+      this.root.position.copy(this.head).addScaledVector(f, nd).setY(y);
+      if (this.anchor) {
+        (this.anchor as XRAnchor & { delete?: () => void }).delete?.();
+        this.anchor = null;
+        this.wantAnchor = true;
+      }
+      if (FLAGS.debug) console.log('[gossamer] surface in front at', room.blocked.toFixed(2), 'm: web brought in to', nd.toFixed(2));
+      return this.scan(frame);
     }
     if (!this.framed) {
       this.ceilY = room.ceilY;
@@ -1844,6 +1863,7 @@ export class Game {
   }
   private holdPool = Array.from({ length: 32 }, () => new Vector3());
   private pokeSpiderAt = 0;
+  private touchAt = new Vector3();
   private tipSpeedL = 0;
   private tipSpeedR = 0;
 
@@ -1908,10 +1928,27 @@ export class Game {
       const sp = h === this.hands.left ? 'tipSpeedL' : 'tipSpeedR';
       this[sp] = Math.max(vel.length(), this[sp] * Math.exp(-dt * 10));
       const speed = this[sp];
+      // Where the touch lands: the fingertip itself, at the web; or, when you jab toward something your
+      // fingertip covers from where you look, that point on the web. The web hangs at arm's length, so
+      // seated, everything stays touchable within two feet.
+      const eye = this.camLocal;
+      let at: Vector3 | null = null;
+      let far = false; // a touch at a distance is aimed more coarsely than a fingertip on the silk
+      if (Math.abs(tip.z) < 0.04 || crossed) at = this.touchAt.set(tip.x, tip.y, zAt);
+      else {
+        const ray = this.v3.copy(tip).sub(eye);
+        const reach = ray.length();
+        const along = vel.dot(ray) / Math.max(reach, 1e-3);
+        if (reach > 0.3 && along > 0.25 && tip.z > 0 && eye.z > tip.z) {
+          at = this.touchAt.copy(eye).addScaledVector(ray, eye.z / (eye.z - tip.z));
+          far = true;
+        }
+      }
+      if (!at) continue;
       // poke a fly caught in the web: it struggles; poke it enough and it tears free and is gone
       if (speed > 0.06) {
         for (const f of this.swarm.flies) {
-          if (f.state !== 'stuck' || f.wrapped || f.p.distanceTo(tip) > 0.03 || this.clock < f.pokeAt) continue;
+          if (f.state !== 'stuck' || f.wrapped || f.p.distanceTo(at) > (far ? 0.05 : 0.035) || this.clock < f.pokeAt) continue;
           f.pokeAt = this.clock + 0.35;
           f.pokes++;
           f.burst = 0.6;
@@ -1930,24 +1967,24 @@ export class Game {
         }
       }
       // touch the spider: it flinches back, then lifts a leg to you
-      if (speed > 0.05 && this.clock > this.pokeSpiderAt && tip.distanceTo(this.S) < 0.035 * this.spider.size + 0.015) {
+      if (speed > 0.05 && this.clock > this.pokeSpiderAt && at.distanceTo(this.S) < 0.035 * this.spider.size + 0.02) {
         this.pokeSpiderAt = this.clock + 1.2;
-        this.Sprev.addScaledVector(this.v3.copy(tip).sub(this.S).normalize(), 0.006);
+        this.Sprev.addScaledVector(this.v3.copy(at).sub(this.S).normalize(), 0.006);
         this.spider.wave = Math.max(this.spider.wave, 0.7);
         this.audio.pluck(note(9), 0.05, this.wpos(this.S), 0.6);
       }
-      if (this.pluckCool > 0 || speed < 0.05 || (!crossed && Math.abs(tip.z) > 0.04)) continue;
-      const hit = this.web.nearestC(tip.x, tip.y, zAt, crossed ? 0.03 : 0.02);
+      if (this.pluckCool > 0 || speed < 0.05) continue;
+      const hit = this.web.nearestC(at.x, at.y, at.z, crossed || far ? 0.03 : 0.022);
       if (!hit) continue;
       const k = Math.min(0.012, vel.length() * 0.01);
       vel.normalize();
       this.web.impulse(hit.c, hit.t, vel.x * k, vel.y * k, vel.z * k * 1.5);
       this.web.glint[hit.c] = 1;
       const pitch = 3 + Math.floor(clamp(this.web.base[hit.c] * 40, 0, 9));
-      this.audio.pluck(note(pitch), 0.08, this.wpos(tip), 2);
-      this.attention = { p: tip.clone(), t: this.clock };
+      this.audio.pluck(note(pitch), 0.08, this.wpos(at), 2);
+      this.attention = { p: at.clone(), t: this.clock };
       // the spider startles toward it
-      this.Sprev.addScaledVector(this.v3.copy(tip).sub(this.S).normalize(), -0.003);
+      this.Sprev.addScaledVector(this.v3.copy(at).sub(this.S).normalize(), -0.003);
       this.pluckCool = 0.15;
     }
   }

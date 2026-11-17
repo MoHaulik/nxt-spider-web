@@ -51,8 +51,8 @@ WebXR on Meta's Immersive Web SDK with three.js. Everything is procedural and or
 
 ## How it meets the brief
 - Hands-first, end to end: point, pinch, sweep, flick; no controller is ever needed.
-- Seated, within two feet: a web at arm's length in the central field of view; small hand movements steer.
-- Passthrough with purpose: scene understanding ties the web to your real ceiling, walls, floor and furniture, and the brood settles on real surfaces. In another room it is a different game.
+- Seated, within two feet: a web at arm's length in the central field of view; small hand movements steer, and you can touch the far silk by jabbing at what your fingertip covers.
+- Passthrough with purpose: scene understanding ties the web to your real ceiling, walls, floor and furniture, and the brood settles on real surfaces. In another room it is a different game; facing a wall at a desk, the web steps in front of it.
 - Persistent anchors and real time of day drive repeat usage: the web, its stored meals and its families are waiting tomorrow.
 - A payoff inside the first minute (the first catch), taught without a word.
 
@@ -74,7 +74,7 @@ Hands only, seated, no controller and no menus.
 - Shoo flies: a fly veers away from your hand; sweep your hand to drive it into the web.
 - Hold a finger still: a fly may land on it. Flick it into the web.
 - Pinch a fly out of the air and hold it, buzzing; let go at the web to feed your spider by hand.
-- Poke a fly caught in the web: it struggles; poke it three times and it tears free.
+- Poke a fly caught in the web: it struggles; poke it three times and it tears free. You can poke the web from your seat: jab at what your fingertip covers.
 - Touch the spider: it flinches, then lifts a leg to you.
 - Dodge and freeze: move out from under a falling drop; hold still when the bird calls.
 - Lower your hand: the spider goes about its own business (fetches prey, goes to its nest).
