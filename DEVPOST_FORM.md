@@ -39,7 +39,7 @@ Everyone has stopped to watch a spider come down on a single thread. We wanted t
 ## What it does
 Point with your hand and the spider swings there on its dragline. Swing it out toward a real wall, the floor or your sofa and it runs a line there and back. That is the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, swing, and tap again to tie it off. Threads across the middle become true radii through a hub, and the spider lays the sticky spiral wherever you sweep it, the way orb-weavers really build. You choose the architecture; the spider does the craft.
 
-Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, and a quick sweep shoos it into the silk. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
+Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, a quick sweep shoos it into the silk, and if you hold a finger still, a fly may land on it. Flick, and it flies off along your flick, often straight into the web. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
 
 Then the story turns. Rain falls around you and between you and the web. Drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls from one side of the room. Hold still and it passes; move in the open and it tears through. Only then come eggs. A silk nest at the top of the frame fills with each meal. When it's full the spider spins a sac, and after rain, in the sun, it opens. Spiderlings balloon out to real surfaces in your room and build their own small webs.
 
@@ -48,6 +48,13 @@ The web stays anchored where you left it. While you're away the spider wraps the
 
 ## How we built it
 WebXR on Meta's Immersive Web SDK with three.js. Everything is procedural and original. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Dew is rendered as instanced ball-lens drops with per-channel refraction. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and depth-only hand occluders let your real hands pass in front of the silk. All sound is synthesized and tuned to a pentatonic scale, so plucking the web plays it, under a generative score that grows with the ecosystem.
+
+## How it meets the brief
+- Hands-first, end to end: point, pinch, sweep, flick; no controller is ever needed.
+- Seated, within two feet: a web at arm's length in the central field of view; small hand movements steer.
+- Passthrough with purpose: scene understanding ties the web to your real ceiling, walls, floor and furniture, and the brood settles on real surfaces. In another room it is a different game.
+- Persistent anchors and real time of day drive repeat usage: the web, its stored meals and its families are waiting tomorrow.
+- A payoff inside the first minute (the first catch), taught without a word.
 
 ## What's next
 More species and web architectures, seasons, and shared rooms where two people's spiders build together, on the Meta Horizon Store.
@@ -65,6 +72,7 @@ Hands only, seated, no controller and no menus.
 - Sweep to lay the spiral: the sticky spiral is laid where the spider is.
 - Touch a caught fly with the spider: it is taken and eaten.
 - Shoo flies: a fly veers away from your hand; sweep your hand to drive it into the web.
+- Hold a finger still: a fly may land on it. Flick it into the web.
 - Dodge and freeze: move out from under a falling drop; hold still when the bird calls.
 - Lower your hand: the spider goes about its own business (fetches prey, goes to its nest).
 - Pluck a thread with your fingertip: it rings and sways.

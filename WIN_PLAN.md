@@ -52,6 +52,9 @@ Measured in a 10-minute normal-speed session in the Quest 3 emulator, with a bot
 
 ## Implemented today (live)
 - **Flies react to your hands.** A fly near your hand flees, always toward the web (away from you), and a deliberate fast sweep carries it along, so you can shoo flies into the silk. A startled fly's buzz rises. Normal steering moves are too slow to fling flies around. A first version that pushed flies directly away from the hand cut catches from 3 to 1 in a test run; this version restores them.
+- **A fly lands on your finger.** Hold a fingertip still near passing flies and one may land on it, sit, turn and clean itself; flick, and it flies off along your flick, often into the web (with a soft whir). Not the first fly, not gnats. Verified in the emulator: landing, and a flick launching it at 1.2 m/s toward the web.
+- **Broken sticky threads go back on the spider's list** to be relaid, so a raid by the bird doesn't leave the second half of a session empty for a player who doesn't rebuild.
+- **The form text is in the rubric's words** (a short "How it meets the brief" section), since AI may assist the judges.
 - **Rain weighs the web down but no longer kills it** (wet decay ×1.25 instead of ×2.2), and it lasts 50 s instead of 75.
 - **The web ages gradually:** half the decay speed, and each thread ages at its own rate, so old threads sag and fail one by one as a warning instead of the whole web collapsing at once.
 - **Eggs are reachable in a normal session:** 3 meals after the bird fill the nest (was 4), 2 meals feed the sac (was 3), and a fed sac brings the next rain closer.
@@ -66,7 +69,7 @@ Measured in a 10-minute normal-speed session in the Quest 3 emulator, with a bot
 The bot only chases caught flies and never sweeps the spider around to relay the spiral, so after the bird its catch rate falls. **Watch for this in the headset test:** does a person naturally rebuild after the bird? If not, the spiral should regrow more by itself.
 
 ## Bigger swings: these need Morten's sign-off (little time left; each should be tested on a headset)
-1. **A fly lands on your finger.** Hold a hand still and open, and a passing fly may land on your real fingertip, crawl, and clean its wings; flick it toward the web. The most tactile, most "only in MR" moment we could add, and the hook shot for the video. About 2 hours plus a headset test.
+1. ~~A fly lands on your finger~~ (done; check it on the headset). Hold a hand still and open, and a passing fly may land on your real fingertip, crawl, and clean its wings; flick it toward the web. The most tactile, most "only in MR" moment we could add, and the hook shot for the video. About 2 hours plus a headset test.
 2. **Real objects hide the web** (WebXR depth sensing, `iwsdk-depth-occlusion`). A person or chair in front of the web hides it properly. That addresses "holding up in rooms" and Technical. Frame-rate risk on Quest, so test with `?fps`. About 1–2 hours.
 3. **Gaze:** the spider looks where you look, and lingering on a caught fly sends it there when your hand rests. Gaze is in the Technical rubric. Needs Quest Pro or Quest 3 gaze support; check first.
 4. **Accessibility pass:** a one-handed mode is already implied; add a "hold still to spin" alternative to the pinch, for hands that can't pinch. That could strengthen the Accessibility Forward case. About 1 hour.

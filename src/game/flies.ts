@@ -19,7 +19,7 @@ import {
 import { CFG } from './config.js';
 import { CAPTURE, MOOR, RADIAL, Web } from './web.js';
 
-export type FlyState = 'fly' | 'stuck' | 'eaten' | 'gone';
+export type FlyState = 'fly' | 'stuck' | 'perch' | 'eaten' | 'gone';
 export type FlyKind = 'fly' | 'moth' | 'gnat';
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -158,6 +158,9 @@ export class Fly {
 
   wrapT = 0; // 0..1 as the spider binds it in silk
   startled = 0; // seconds of fright after a hand came close (the buzz rises)
+  perchOn: { p: Vector3; v: Vector3; tip: boolean; still: number; has?: boolean } | null = null; // a fingertip it has landed on
+  perchT = 0;
+  flung = 0; // seconds since a flick launched it (it flies straight, it does not wander)
   toColony: Vector3 | null = null; // flying off toward a spiderling family's web
   private parcelMesh: Mesh | null = null;
 
@@ -218,6 +221,7 @@ export class Fly {
 }
 
 export type SwarmEvents = {
+  onFlick?(f: Fly): void;
   onStick(f: Fly): void;
   onEscape(f: Fly): void;
   onBounce(f: Fly, c: number): void;
@@ -277,12 +281,37 @@ export class Swarm {
    * Your hands, in the web frame: a fly veers away from a hand that comes near, and a quick sweep carries
    * it along, so you can shoo flies toward your web.
    */
-  hands: { p: Vector3; v: Vector3 }[] = [];
+  hands: { p: Vector3; v: Vector3; tip: boolean; still: number }[] = [];
 
   update(dt: number, t: number, web: Web, bounds: number) {
     for (const f of this.flies) {
       f.age += dt;
       if (f.state === 'fly') {
+        if (f.flung > 0) f.flung -= dt;
+        // a fingertip held still is a place to land
+        if (!f.perchOn && !f.sure && !f.leaving && f.kind !== 'gnat' && f.flung <= 0) {
+          for (const h of this.hands) {
+            if (!h.tip || h.still < 1.2 || f.p.distanceTo(h.p) > 0.35 || this.flies.some((o) => o.perchOn === h)) continue;
+            if (Math.random() < dt * 0.6) f.perchOn = h;
+          }
+        }
+        if (f.perchOn) {
+          const h = f.perchOn;
+          if (h.has === false || h.still < 0.2) f.perchOn = null; // the hand moved: it thinks better of it
+          else {
+            f.target.set(h.p.x, h.p.y + 0.013, h.p.z);
+            f.commit = true;
+            f.hover = 0;
+            f.retarget = 1;
+            if (f.p.distanceTo(f.target) < 0.014) {
+              f.state = 'perch';
+              f.perchT = 0;
+              f.v.set(0, 0, 0);
+              f.animate(dt, t);
+              continue;
+            }
+          }
+        }
         f.retarget -= dt;
         if (f.retarget <= 0) this.pickTarget(f, web, bounds);
         if (f.age > 28 && !f.sure) f.leaving = true;
@@ -297,8 +326,9 @@ export class Swarm {
         desired.x += Math.sin(t * 7.1 + f.age * 3) * 0.08 + (Math.random() - 0.5) * 0.25;
         desired.y += Math.sin(t * 5.3 + f.age) * 0.06 + (Math.random() - 0.5) * 0.2;
         desired.z += (Math.random() - 0.5) * 0.2;
-        f.v.lerp(desired, 1 - Math.exp(-dt * (f.hover > 0 ? 6 : 3.2)));
-        for (const h of this.hands) {
+        if (f.flung > 0) f.v.multiplyScalar(Math.exp(-dt * 0.8)); // flicked: it flies straight a moment
+        else f.v.lerp(desired, 1 - Math.exp(-dt * (f.hover > 0 ? 6 : 3.2)));
+        for (const h of f.flung > 0 || f.perchOn ? [] : this.hands) {
           const dx = f.p.x - h.p.x, dy = f.p.y - h.p.y, dz = f.p.z - h.p.z;
           const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
           if (d > 0.16 || d < 1e-4) continue;
@@ -345,6 +375,31 @@ export class Swarm {
           }
         }
         if (f.leaving && f.p.length() > 3.2) f.state = 'gone';
+      } else if (f.state === 'perch') {
+        // on your fingertip: it sits, turns, cleans itself; a flick sends it off along the flick
+        const h = f.perchOn;
+        f.perchT += dt;
+        const speed = h ? Math.hypot(h.v.x, h.v.y, h.v.z) : 0;
+        if (!h || h.has === false || f.perchT > 14 || (speed > 0.25 && speed <= 0.7)) {
+          f.state = 'fly';
+          f.perchOn = null;
+          f.v.set((Math.random() - 0.5) * 0.4, 0.35, -0.3);
+          f.retarget = 0;
+          f.flung = 0.4;
+        } else if (speed > 0.7) {
+          f.state = 'fly';
+          f.perchOn = null;
+          f.v.set(h.v.x, h.v.y, h.v.z).multiplyScalar(1.3).clampLength(0, 2.2);
+          f.flung = 1.1;
+          f.retarget = 1.1;
+          f.hover = 0;
+          f.target.copy(f.p).addScaledVector(f.v, 1.5);
+          this.ev.onFlick?.(f);
+        } else {
+          f.p.set(h.p.x, h.p.y + 0.013, h.p.z);
+          f.v.set(0, 0, 0);
+          f.heading.set(Math.sin(f.perchT * 0.5 + f.age), 0, Math.cos(f.perchT * 0.5 + f.age)).normalize();
+        }
       } else if (f.state === 'stuck') {
         if (!web.cAlive[f.stuckC]) {
           if (f.wrapped) {

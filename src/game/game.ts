@@ -172,6 +172,7 @@ export class Game {
     this.spider = new Spider(env, CFG.spiderLength);
     this.swarm = new Swarm(env, {
       onStick: (f) => this.onStick(f),
+      onFlick: (f) => this.audio.noiseBurst(0.14, 2200, 0.035, this.wpos(f.p)), // a flicked fly whirs off
       onEscape: (f) => this.audio.pluck(note(3), 0.05, this.wpos(f.p)),
       onBounce: (f, c) => this.audio.pluck(note(8 + Math.floor(this.web.seed[c] * 5)), 0.05, this.wpos(f.p), 0.6),
     });
@@ -182,7 +183,14 @@ export class Game {
       for (let k = 0; k < 6; k++) this.later.push({ t: this.clock + k * 0.18, fn: () => this.audio.pluck(note(15 + k), 0.03, this.wpos(p), 1.2) });
     };
     this.brood.onArrive = (p) => this.audio.pluck(note(16 + Math.floor(Math.random() * 4)), 0.02, this.wpos(p), 0.8);
-    this.web.onBreak = (_c, x, y, z) => this.audio.snap(this.wpos(this.v3.set(x, y, z)));
+    this.web.onBreak = (c, x, y, z) => {
+      this.audio.snap(this.wpos(this.v3.set(x, y, z)));
+      // a sticky thread that broke between two radii that still hold goes back on the spider's list
+      if (this.web.kind[c] === CAPTURE && this.rungQueue.length < 160) {
+        const a = this.web.ca[c], b = this.web.cb[c];
+        this.later.push({ t: this.clock + 0.1, fn: () => this.web.pAlive[a] && this.web.pAlive[b] && this.web.anchored[a] && this.web.anchored[b] && this.rungQueue.push([a, b]) });
+      }
+    };
 
     const gt = glowTexture();
     const sprite = (tex = gt, color = new Color(1, 1, 1), order = 20) => {
@@ -896,18 +904,20 @@ export class Game {
         const slot = this.flyHands[k++];
         if (!h.seen) {
           slot.has = false;
+          slot.still = 0;
           continue;
         }
         const now = this.v1.copy(src).applyMatrix4(this.world.player.matrixWorld).applyMatrix4(this.toLocal);
         if (slot.has) slot.v.copy(now).sub(slot.p).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 3);
         else slot.v.set(0, 0, 0);
         slot.p.copy(now);
+        slot.still = slot.has && slot.v.length() < 0.06 ? slot.still + dt : 0;
         slot.has = true;
         list.push(slot);
       }
     }
   }
-  private flyHands = Array.from({ length: 4 }, () => ({ p: new Vector3(), v: new Vector3(), has: false }));
+  private flyHands = Array.from({ length: 4 }, (_, i) => ({ p: new Vector3(), v: new Vector3(), has: false, tip: i % 2 === 1, still: 0 }));
   private tap: HandState | null = null;
   private motionL = { v: 0 };
   private motionR = { v: 0 };
