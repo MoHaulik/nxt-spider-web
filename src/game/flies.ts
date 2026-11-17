@@ -19,7 +19,7 @@ import {
 import { CFG } from './config.js';
 import { CAPTURE, MOOR, RADIAL, Web } from './web.js';
 
-export type FlyState = 'fly' | 'stuck' | 'perch' | 'eaten' | 'gone';
+export type FlyState = 'fly' | 'stuck' | 'perch' | 'held' | 'eaten' | 'gone';
 export type FlyKind = 'fly' | 'moth' | 'gnat';
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -161,6 +161,9 @@ export class Fly {
   perchOn: { p: Vector3; v: Vector3; tip: boolean; still: number; has?: boolean } | null = null; // a fingertip it has landed on
   perchT = 0;
   flung = 0; // seconds since a flick launched it (it flies straight, it does not wander)
+  pokes = 0; // fingertip pokes while caught in the web: enough of them and it tears free
+  pokeAt = 0;
+  handSure = false; // released at the web by your hand: it sticks to the first thread it meets
   toColony: Vector3 | null = null; // flying off toward a spiderling family's web
   private parcelMesh: Mesh | null = null;
 
@@ -193,8 +196,8 @@ export class Fly {
       this.g.lookAt(this.p.clone().add(this.heading));
       return;
     }
-    const flying = this.state === 'fly';
-    const kicking = this.state === 'stuck' && this.burst > 0;
+    const flying = this.state === 'fly' || this.state === 'held';
+    const kicking = (this.state === 'stuck' && this.burst > 0) || this.state === 'held';
     this.wings.forEach((w, i) => {
       const side = i === 0 ? -1 : 1;
       if (this.kind === 'moth' && (flying || kicking)) {
@@ -287,7 +290,10 @@ export class Swarm {
     for (const f of this.flies) {
       f.age += dt;
       if (f.state === 'fly') {
-        if (f.flung > 0) f.flung -= dt;
+        if (f.flung > 0) {
+          f.flung -= dt;
+          if (f.flung <= 0 && f.handSure) f.sure = f.handSure = false; // it missed: an ordinary fly again
+        }
         // a fingertip held still is a place to land
         if (!f.perchOn && !f.sure && !f.leaving && f.kind !== 'gnat' && f.flung <= 0) {
           for (const h of this.hands) {
@@ -353,7 +359,7 @@ export class Swarm {
         if (f.p.y < web.floorY + 0.05) f.v.y = Math.abs(f.v.y);
         // crossing the web plane: test the silk
         if (Math.abs(f.p.z) < 0.08 || Math.sign(prevZ) !== Math.sign(f.p.z)) {
-          const hit = web.nearestC(f.p.x, f.p.y, f.p.z, 0.007, (1 << CAPTURE) | (1 << RADIAL) | (1 << MOOR));
+          const hit = web.nearestC(f.p.x, f.p.y, f.p.z, f.handSure ? 0.025 : 0.007, (1 << CAPTURE) | (1 << RADIAL) | (1 << MOOR));
           if (hit) {
             const k = web.kind[hit.c];
             const p = f.sure ? 1 : (k === CAPTURE ? 0.9 : k === RADIAL ? 0.22 : 0.08) * (f.kind === 'moth' ? 0.8 : 1); // the first fly always sticks
@@ -375,6 +381,8 @@ export class Swarm {
           }
         }
         if (f.leaving && f.p.length() > 3.2) f.state = 'gone';
+      } else if (f.state === 'held') {
+        // between your fingers: the game moves it; it only buzzes and kicks
       } else if (f.state === 'perch') {
         // on your fingertip: it sits, turns, cleans itself; a flick sends it off along the flick
         const h = f.perchOn;

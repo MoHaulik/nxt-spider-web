@@ -37,9 +37,9 @@ WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub 
 Everyone has stopped to watch a spider come down on a single thread. We wanted that moment in mixed reality, treated like cinema rather than a toy. Gossamer has no words, menus or score in the world. Your room dims, something glints on your real ceiling, and a small spider lowers itself, perfectly straight, until it hangs at arm's length in front of you. Then it is yours.
 
 ## What it does
-Point with your hand and the spider swings there on its dragline. Swing it out toward a real wall, the floor or your sofa and it runs a line there and back. That is the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, swing, and tap again to tie it off. Threads across the middle become true radii through a hub, and the spider lays the sticky spiral wherever you sweep it, the way orb-weavers really build. You choose the architecture; the spider does the craft.
+Point with your hand and the spider swings there on its dragline. Swing it out toward a real wall, the floor or your sofa and it casts a line that zips out and ties there. That is the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, swing, and tap again to tie it off. Threads across the middle become true radii through a hub, and the spider lays the sticky spiral wherever you sweep it, the way orb-weavers really build. You choose the architecture; the spider does the craft.
 
-Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, a quick sweep shoos it into the silk, and if you hold a finger still, a fly may land on it. Flick, and it flies off along your flick, often straight into the web. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
+Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, a quick sweep shoos it into the silk, and if you hold a finger still, a fly may land on it. Flick, and it flies off along your flick, often straight into the web. Pinch one out of the air and feed it to your spider by hand, or poke a caught fly until it tears free. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
 
 Then the story turns. Rain falls around you and between you and the web. Drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls from one side of the room. Hold still and it passes; move in the open and it tears through. Only then come eggs. A silk nest at the top of the frame fills with each meal. When it's full the spider spins a sac, and after rain, in the sun, it opens. Spiderlings balloon out to real surfaces in your room and build their own small webs.
 
@@ -67,12 +67,15 @@ More species and web architectures, seasons, and shared rooms where two people's
 ```
 Hands only, seated, no controller and no menus.
 - Point to steer: raise your hand and point; the spider goes where you point on the web.
-- Swing to tie: at the start, swing the spider toward a wall, the floor or furniture and it runs a mooring line there.
+- Swing to tie: at the start, swing the spider toward a wall, the floor or furniture and it casts a line that zips out and ties there; you never lose control.
 - Tap your fingers: a thread begins at the spider. Swing, then tap again to tie it off (holding the pinch also works). Either hand can tap while the other steers.
 - Sweep to lay the spiral: the sticky spiral is laid where the spider is.
 - Touch a caught fly with the spider: it is taken and eaten.
 - Shoo flies: a fly veers away from your hand; sweep your hand to drive it into the web.
 - Hold a finger still: a fly may land on it. Flick it into the web.
+- Pinch a fly out of the air and hold it, buzzing; let go at the web to feed your spider by hand.
+- Poke a fly caught in the web: it struggles; poke it three times and it tears free.
+- Touch the spider: it flinches, then lifts a leg to you.
 - Dodge and freeze: move out from under a falling drop; hold still when the bird calls.
 - Lower your hand: the spider goes about its own business (fetches prey, goes to its nest).
 - Pluck a thread with your fingertip: it rings and sways.

@@ -569,7 +569,7 @@ export class Game {
   }
 
   private frameStep(dt: number, t: number) {
-    if (this.trip) return;
+    if (this.trip || this.cast) return;
     const next = this.frameNext();
     if (!next) {
       this.closeFrame();
@@ -598,13 +598,27 @@ export class Game {
     if (a.tied) return;
     a.tied = true;
     if (!trip) return this.moor(a);
-    const from = this.S.clone();
-    const dist = from.distanceTo(a.pos);
-    this.trip = { a, t: 0, out: 0.5 + dist * 0.45, back: 0.45 + dist * 0.38, from, moored: false };
-    this.controls = false;
+    // the spider stays under your hand and *casts* the line: it zips out to the real surface and ties
+    const dist = this.S.distanceTo(a.pos);
+    this.cast = { a, t: 0, dur: 0.28 + dist * 0.16 };
     this.spider.wave = 0;
-    this.audio.spinHiss(0.8);
+    this.audio.spinHiss(0.9);
   }
+
+  /** The cast line flying out to its surface; when it lands it ties, and the spider feels the tug. */
+  private castStep(dt: number) {
+    const C = this.cast!;
+    C.t += dt;
+    this.laying = Math.max(this.laying, 0.15); // the back legs comb the silk out as it goes
+    if (C.t < C.dur) return;
+    this.cast = null;
+    this.audio.spinHiss(0);
+    this.moor(C.a);
+    const d = this.v1.copy(C.a.pos).sub(this.S).normalize();
+    this.Sprev.addScaledVector(d, -0.006); // the tug as the line goes taut
+    if (!this.frameNext()) this.closeFrame();
+  }
+  private cast: { a: FrameAnchor; t: number; dur: number } | null = null;
 
   /** Spin the mooring: from the real surface back to the ring. */
   private moor(a: FrameAnchor) {
@@ -809,6 +823,7 @@ export class Game {
     this.laySpiral(sdt);
     this.nesting(sdt);
     this.touch(dt);
+    this.holdFly(dt);
     this.colonyFlies();
     this.weather(dt);
     this.draw(dt);
@@ -872,6 +887,8 @@ export class Game {
       lp.copy(w);
       w.sub(this.head);
       const f = w.dot(fh), y = w.y;
+      if (h === L) this.reachL = f;
+      else this.reachR = f;
       const aim = this.aimFrom(h, h === L ? this.aimL : this.aimR);
       const r = aim ? Math.hypot(aim.x, aim.y) : Infinity;
       h.engaged = h.engaged ? f > 0.02 && y > -0.62 && r < b * 2.4 : f > 0.06 && y > -0.55 && r < b * 1.8;
@@ -882,7 +899,9 @@ export class Game {
     if (a && L.engaged && R.engaged) {
       const other = a === L ? R : L;
       const ma = a === L ? this.motionL : this.motionR, mo = other === L ? this.motionL : this.motionR;
-      if (mo.v > 0.25 && ma.v < 0.08 && !this.live) a = other;
+      // a hand stretched far out is reaching to touch (poke, pluck, shoo), not taking the steering
+      const reaching = (other === L ? this.reachL : this.reachR) > 0.42;
+      if (mo.v > 0.25 && ma.v < 0.08 && !this.live && !reaching) a = other;
     }
     if (a !== this.active) {
       this.needNeutral = true;
@@ -919,6 +938,8 @@ export class Game {
   }
   private flyHands = Array.from({ length: 4 }, (_, i) => ({ p: new Vector3(), v: new Vector3(), has: false, tip: i % 2 === 1, still: 0 }));
   private tap: HandState | null = null;
+  private reachL = 0;
+  private reachR = 0;
   private motionL = { v: 0 };
   private motionR = { v: 0 };
   private lastPosL = new Vector3();
@@ -1027,6 +1048,7 @@ export class Game {
       }
     }
     if (this.trip) this.tripStep(dt);
+    if (this.cast) this.castStep(dt);
     this.spider.size += (this.sizeFor(this.food) - this.spider.size) * (1 - Math.exp(-dt * 1.2));
     const up = this.v2.copy(P).sub(S);
     if (up.lengthSq() < 1e-6) up.set(0, 1, 0);
@@ -1048,6 +1070,18 @@ export class Game {
     const reach = CFG.attachReach * (0.85 + this.spider.size * 0.15);
 
     if (tap && !canSpin && this.controls) this.audio.pluck(note(5), 0.03, this.wpos(s), 0.4);
+    // a pinch right at a flying fly takes it out of the air instead of spinning
+    if (tap && !this.live && !this.held && this.controls) {
+      const pp = this.handLocal({ ...tap, pos: tap.pinch }, this.v3);
+      const f = this.swarm.flies.find((x) => (x.state === 'fly' || x.state === 'perch') && !x.wrapped && x.p.distanceTo(pp) < 0.05);
+      if (f) {
+        f.state = 'held';
+        f.perchOn = null;
+        this.held = { f, hand: tap, t: 0 };
+        this.audio.pluck(note(11), 0.06, this.wpos(f.p), 0.5);
+        return;
+      }
+    }
     if (canSpin && tap && !this.live) {
       // a tap always spins. (Only a completely full solver says no, after hours of building.)
       if (!w.roomFor(60)) {
@@ -1809,6 +1843,51 @@ export class Game {
     }
   }
   private holdPool = Array.from({ length: 32 }, () => new Vector3());
+  private pokeSpiderAt = 0;
+  private tipSpeedL = 0;
+  private tipSpeedR = 0;
+
+  /**
+   * A fly pinched out of the air is held between your fingers, buzzing. Let go near the web and it sticks
+   * there: you have fed your spider by hand. Let go anywhere else and it flies off.
+   */
+  private holdFly(dt: number) {
+    const H = this.held;
+    if (!H) return;
+    const f = H.f, h = H.hand;
+    H.t += dt;
+    if (f.state !== 'held') {
+      this.held = null;
+      return;
+    }
+    if (h.seen && h.pinching && H.t < 10) {
+      const p = this.handLocal({ ...h, pos: h.pinch }, this.v1);
+      f.v.copy(p).sub(f.p).divideScalar(Math.max(dt, 1e-3));
+      f.p.copy(p);
+      f.heading.set(Math.sin(H.t * 7), 0.3, Math.cos(H.t * 7)).normalize();
+      f.startled = 0.5;
+      return;
+    }
+    this.held = null;
+    const hit = Math.abs(f.p.z) < 0.14 ? this.web.nearestC(f.p.x, f.p.y, f.p.z, 0.12) : null;
+    if (hit) {
+      // let go near the web: it darts straight into the nearest thread, and the silk takes it
+      const q = this.web.pointOn(hit.c, hit.t, { x: 0, y: 0, z: 0 });
+      f.state = 'fly';
+      f.v.set(q.x - f.p.x, q.y - f.p.y, q.z - f.p.z - 0.05).setLength(0.9);
+      f.flung = 0.5;
+      f.handSure = true;
+      f.sure = true;
+      f.retarget = 0.5;
+    } else {
+      f.state = 'fly';
+      f.flung = 0.5;
+      f.v.clampLength(0, 1.8);
+      if (f.v.lengthSq() < 0.04) f.v.set((Math.random() - 0.5) * 0.4, 0.4, -0.3);
+      f.retarget = 0.5;
+    }
+  }
+  private held: { f: Fly; hand: HandState; t: number } | null = null;
   private groomT = 8;
   private grooming = 0;
 
@@ -1825,8 +1904,40 @@ export class Game {
       const crossed = Math.sign(last.z) !== Math.sign(tip.z) && Math.abs(last.z - tip.z) < 0.15;
       const zAt = crossed ? 0 : tip.z;
       last.copy(tip);
-      if (this.pluckCool > 0 || vel.length() < 0.05 || (!crossed && Math.abs(tip.z) > 0.03)) continue;
-      const hit = this.web.nearestC(tip.x, tip.y, zAt, crossed ? 0.022 : 0.015);
+      // fingertip speed over the last tenth of a second: a touch is a motion, not a single frame
+      const sp = h === this.hands.left ? 'tipSpeedL' : 'tipSpeedR';
+      this[sp] = Math.max(vel.length(), this[sp] * Math.exp(-dt * 10));
+      const speed = this[sp];
+      // poke a fly caught in the web: it struggles; poke it enough and it tears free and is gone
+      if (speed > 0.06) {
+        for (const f of this.swarm.flies) {
+          if (f.state !== 'stuck' || f.wrapped || f.p.distanceTo(tip) > 0.03 || this.clock < f.pokeAt) continue;
+          f.pokeAt = this.clock + 0.35;
+          f.pokes++;
+          f.burst = 0.6;
+          this.web.impulse(f.stuckC, f.stuckT, vel.x * 0.004, vel.y * 0.004, vel.z * 0.006);
+          this.audio.noiseBurst(0.08, 1800 + f.pokes * 500, 0.03, this.wpos(f.p));
+          if (f.pokes >= 3) {
+            this.web.hp[f.stuckC] -= 0.35;
+            f.state = 'fly';
+            f.leaving = true;
+            f.flung = 0.5;
+            f.v.set(vel.x * 0.4, 0.5, Math.min(-0.2, vel.z * 0.4));
+            f.retarget = 0;
+            this.audio.pluck(note(12), 0.05, this.wpos(f.p), 0.8);
+          }
+          this.pluckCool = 0.2;
+        }
+      }
+      // touch the spider: it flinches back, then lifts a leg to you
+      if (speed > 0.05 && this.clock > this.pokeSpiderAt && tip.distanceTo(this.S) < 0.035 * this.spider.size + 0.015) {
+        this.pokeSpiderAt = this.clock + 1.2;
+        this.Sprev.addScaledVector(this.v3.copy(tip).sub(this.S).normalize(), 0.006);
+        this.spider.wave = Math.max(this.spider.wave, 0.7);
+        this.audio.pluck(note(9), 0.05, this.wpos(this.S), 0.6);
+      }
+      if (this.pluckCool > 0 || speed < 0.05 || (!crossed && Math.abs(tip.z) > 0.04)) continue;
+      const hit = this.web.nearestC(tip.x, tip.y, zAt, crossed ? 0.03 : 0.02);
       if (!hit) continue;
       const k = Math.min(0.012, vel.length() * 0.01);
       vel.normalize();
@@ -2089,6 +2200,22 @@ export class Game {
     const reach = (this.ceilY - s.y) / dir.y;
     const dthick = CFG.baseThick * (0.9 + this.grow01 * 0.8);
     if (this.phase !== 'placing') this.silk.push(s.x, s.y, s.z, s.x + dir.x * reach, s.y + dir.y * reach, s.z + dir.z * reach, dthick, 1, DRAG + 0.3, 1, 0);
+    // a line being cast: it flies out in a light arc from the spinnerets to the real surface
+    if (this.cast) {
+      const C = this.cast, a = C.a.pos;
+      const k = smooth(0, 1, C.t / C.dur);
+      const n = 8;
+      let px = s.x, py = s.y, pz = s.z;
+      for (let i = 1; i <= n; i++) {
+        const u = (i / n) * k;
+        const lift = Math.sin(u * Math.PI) * 0.06 * (1 - k * 0.7);
+        const x = s.x + (a.x - s.x) * u, y = s.y + (a.y - s.y) * u + lift, z = s.z + (a.z - s.z) * u;
+        this.silk.push(px, py, pz, x, y, z, dthick, 1, RADIAL + 0.9, 1, 0);
+        px = x; py = y; pz = z;
+      }
+      this.glow.position.set(px, py, pz);
+      this.glow.scale.setScalar(0.02);
+    }
     this.drawNest(dt);
     // heavy drops: a bead gathering on the ceiling, then a bead with a streak behind it
     for (const d of this.heavy) {
@@ -2105,8 +2232,10 @@ export class Game {
 
     // where the silk will catch when you let go; or, when your hand rests, where the spider is off to
     const at = this.attachTarget;
-    this.glow.visible = at >= 0 || (this.auto && this.controls && !this.trip);
-    if (at >= 0) {
+    this.glow.visible = !!this.cast || at >= 0 || (this.auto && this.controls && !this.trip);
+    if (this.cast) {
+      // the glint rides the tip of the line being cast (placed above)
+    } else if (at >= 0) {
       this.glow.position.set(w.p[at * 3], w.p[at * 3 + 1], w.p[at * 3 + 2] + 0.003);
       this.glow.scale.setScalar(0.022 + Math.sin(this.clock * 9) * 0.004);
     } else if (this.glow.visible) {
@@ -2138,7 +2267,7 @@ export class Game {
       }
       const pw = this.wpos(f.p);
       v.pos(...pw);
-      const lvl = f.wrapped ? 0 : f.state === 'fly' ? 0.2 : f.state === 'stuck' ? (f.burst > 0 ? 0.09 * (1 - f.wrapT) : 0) : 0;
+      const lvl = f.wrapped ? 0 : f.state === 'held' ? 0.3 : f.state === 'fly' ? 0.2 : f.state === 'stuck' ? (f.burst > 0 ? 0.09 * (1 - f.wrapT) : 0) : 0;
       v.level(lvl);
       const vw = this.v2.copy(f.v).applyQuaternion(this.root.quaternion);
       const toMe = this.v3.set(pw[0], pw[1], pw[2]).sub(this.head).normalize();
