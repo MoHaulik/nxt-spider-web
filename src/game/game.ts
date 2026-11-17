@@ -794,6 +794,7 @@ export class Game {
     this.heavyRain(sdt);
     const n = sdt > 1 / 70 ? 2 : 1;
     for (let k = 0; k < n; k++) this.web.step(sdt / n);
+    this.handsForFlies(dt);
     this.swarm.update(sdt, this.clock, this.web, this.bounds);
     this.feed(dt);
     this.economy(dt);
@@ -884,6 +885,29 @@ export class Game {
     this.active = a;
     this.tap = L.engaged && L.down ? L : R.engaged && R.down ? R : null;
   }
+  /** Your hands (knuckles and index tips) with their velocities, in the web frame, for the flies. */
+  private handsForFlies(dt: number) {
+    const list = this.swarm.hands;
+    list.length = 0;
+    if (this.desktop) return;
+    let k = 0;
+    for (const h of [this.hands.left, this.hands.right]) {
+      for (const src of [h.pos, h.tip]) {
+        const slot = this.flyHands[k++];
+        if (!h.seen) {
+          slot.has = false;
+          continue;
+        }
+        const now = this.v1.copy(src).applyMatrix4(this.world.player.matrixWorld).applyMatrix4(this.toLocal);
+        if (slot.has) slot.v.copy(now).sub(slot.p).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 3);
+        else slot.v.set(0, 0, 0);
+        slot.p.copy(now);
+        slot.has = true;
+        list.push(slot);
+      }
+    }
+  }
+  private flyHands = Array.from({ length: 4 }, () => ({ p: new Vector3(), v: new Vector3(), has: false }));
   private tap: HandState | null = null;
   private motionL = { v: 0 };
   private motionR = { v: 0 };
@@ -1025,6 +1049,7 @@ export class Game {
       const head = w.addP(s.x, s.y, s.z, 0);
       const c = w.addC(start, head, RADIAL, thick, 1);
       this.live = { start, last: start, head, c, ids: [start], cs: [c], len: 0, at: this.clock, tap: false, lost: 0 };
+      this.lastSpinAt = this.clock;
       this.spinHand = tap;
       this.pulse(w.p[start * 3], w.p[start * 3 + 1], w.p[start * 3 + 2], 0.018, 0.35); // where the thread begins
       this.audio.pluck(note(7), 0.09, this.wpos(s), 0.8);
@@ -1355,7 +1380,8 @@ export class Game {
     if (this.phase === 'eat' && t > 2 && !this.eatingList.length && !this.swarm.flies.some((f) => f.state === 'stuck')) this.go('firstfly');
     // the pinch cue: two soft points at your fingertips that close together, once, before your first thread
     const h2 = this.active;
-    const pinchCue = this.phase === 'spin' && this.threadsDone === 0 && !this.live && t > 2 && !!h2?.seen && !this.desktop;
+    const ruined = this.phase === 'free' && this.web.totalLength(CAPTURE) < 0.25 && this.clock - this.lastSpinAt > 12 && this.rainI < 0.1;
+    const pinchCue = ((this.phase === 'spin' && this.threadsDone === 0 && t > 2) || ruined) && !this.live && !!h2?.seen && !this.desktop;
     this.hint2.visible = pinchCue;
     if (pinchCue && h2) {
       const c = this.handLocal({ ...h2, pos: h2.pinch }, this.v2);
@@ -1690,6 +1716,7 @@ export class Game {
     if (this.phase === 'eat') this.go('free');
   }
   private afterglow = 0;
+  private lastSpinAt = 0;
   private nestMesh!: Mesh;
   private nestGlow!: Mesh;
   private lights!: ReturnType<typeof makeLights>;
@@ -1897,6 +1924,7 @@ export class Game {
     if (sac && sac.distanceTo(this.S) < 0.05 + 0.02 * this.spider.size) {
       this.carry = 0;
       this.brood.feed(1 / CFG.sacMeals);
+      if (this.brood.sacFed() >= 1 && this.raining <= 0) this.rainClock = Math.min(this.rainClock, FLAGS.fast ? 8 : 35);
       this.pulse(sac.x, sac.y, sac.z, 0.03, 0.6);
       this.audio.chord([4, 7, 11], 0.04, 4);
       this.laying = Math.max(this.laying, 1.2);
@@ -2104,7 +2132,7 @@ export class Game {
       v.level(lvl);
       const vw = this.v2.copy(f.v).applyQuaternion(this.root.quaternion);
       const toMe = this.v3.set(pw[0], pw[1], pw[2]).sub(this.head).normalize();
-      v.pitch(1 - vw.dot(toMe) * 0.14 + (f.state === 'stuck' ? 0.12 : 0));
+      v.pitch(1 - vw.dot(toMe) * 0.14 + (f.state === 'stuck' ? 0.12 : 0) + (f.startled > 0 ? 0.18 : 0)); // a startled fly's buzz rises
     }
   }
 }

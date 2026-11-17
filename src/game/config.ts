@@ -45,8 +45,8 @@ export const CFG = {
   maxThread: 1.0,
   baseThick: 0.00042, // radius of a dry thread at the start
   maxThick: 0.0011,
-  decay: 1 / 210, // health lost per second by an unvisited thread
-  decayCapture: 1 / 160,
+  decay: 1 / 420, // health lost per second by an unvisited thread (about seven minutes to fail)
+  decayCapture: 1 / 320,
   decayMoor: 1 / 1400,
   sag: 0.32, // how much longer a dying thread grows before it snaps
   repairRadius: 0.06,
@@ -78,8 +78,8 @@ export const CFG = {
   rungReach: 0.11, // the spider lays a turn of spiral only where it is (plus a little per size)
   captureCost: 0.5, // sticky silk per metre laid
   wrapTime: 1.6, // seconds to bind a fly (each tap is a turn)
-  mealsPerSac: 4,
-  sacMeals: 3, // meals carried to a laid sac before it can hatch
+  mealsPerSac: 3,
+  sacMeals: 2, // meals carried to a laid sac before it can hatch
   sacMinAge: 75, // seconds before a sac can hatch (then it waits for sun after rain)
   idleTakeover: 2.2, // seconds of a still or absent hand before the spider acts on its own
 
@@ -97,7 +97,7 @@ export const CFG = {
 
   // weather
   firstRain: 125, // seconds into free play (the first rain also waits for `rainAfter` meals)
-  rainLength: 75,
+  rainLength: 50,
   rainGap: [200, 320] as [number, number],
 };
 

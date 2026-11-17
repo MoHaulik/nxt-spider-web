@@ -223,7 +223,8 @@ export class Web {
       let rate = k === MOOR ? 0 : k === CAPTURE ? CFG.decayCapture : CFG.decay;
       if (!this.decayOn) rate = 0;
       rate *= this.decayScale;
-      rate *= 1 + this.cwet[c] * 1.2;
+      rate *= 0.55 + this.seed[c] * 0.9; // each thread ages at its own pace: they fail one by one, a warning, never all at once
+      rate *= 1 + this.cwet[c] * 0.25; // rain weighs silk down (it sags), but must not wipe the web out
       if (free) rate = 0.55;
       this.hp[c] -= dt * rate;
       const h = Math.max(0, this.hp[c]);

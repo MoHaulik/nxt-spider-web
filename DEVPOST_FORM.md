@@ -39,7 +39,7 @@ Everyone has stopped to watch a spider come down on a single thread. We wanted t
 ## What it does
 Point with your hand and the spider swings there on its dragline. Swing it out toward a real wall, the floor or your sofa and it runs a line there and back. That is the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, swing, and tap again to tie it off. Threads across the middle become true radii through a hub, and the spider lays the sticky spiral wherever you sweep it, the way orb-weavers really build. You choose the architecture; the spider does the craft.
 
-Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
+Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, and a quick sweep shoos it into the silk. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
 
 Then the story turns. Rain falls around you and between you and the web. Drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls from one side of the room. Hold still and it passes; move in the open and it tears through. Only then come eggs. A silk nest at the top of the frame fills with each meal. When it's full the spider spins a sac, and after rain, in the sun, it opens. Spiderlings balloon out to real surfaces in your room and build their own small webs.
 
@@ -64,6 +64,7 @@ Hands only, seated, no controller and no menus.
 - Tap your fingers: a thread begins at the spider. Swing, then tap again to tie it off (holding the pinch also works). Either hand can tap while the other steers.
 - Sweep to lay the spiral: the sticky spiral is laid where the spider is.
 - Touch a caught fly with the spider: it is taken and eaten.
+- Shoo flies: a fly veers away from your hand; sweep your hand to drive it into the web.
 - Dodge and freeze: move out from under a falling drop; hold still when the bird calls.
 - Lower your hand: the spider goes about its own business (fetches prey, goes to its nest).
 - Pluck a thread with your fingertip: it rings and sways.
@@ -76,8 +77,10 @@ Open https://mohaulik.github.io/nxt-spider-web/ in the Meta Quest browser on a Q
 ```
 
 ## Special awards to tick (only those the form offers)
-- Best First Five Minutes
-- Best Reason to Come Back
+- Best First Five Minutes: the opening teaches everything without a word
+- Best Reason to Come Back: the web and the brood persist and grow between sessions
+- Boldest Original Concept: the web is tied to your real ceiling and walls, and the brood settles on your real surfaces; it can't exist off a mixed-reality headset
+(Rules: one prize per entry. The judges pick the award, but the description should make the case for each.)
 
 ## Gallery images (4–6 stills, taken from Morten's headset clips)
 The descent from the ceiling · the scaffold swing to a real wall · the dewy web · the bird · spiderlings on a real wall · the morning after.

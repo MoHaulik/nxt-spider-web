@@ -157,6 +157,7 @@ export class Fly {
   }
 
   wrapT = 0; // 0..1 as the spider binds it in silk
+  startled = 0; // seconds of fright after a hand came close (the buzz rises)
   toColony: Vector3 | null = null; // flying off toward a spiderling family's web
   private parcelMesh: Mesh | null = null;
 
@@ -272,6 +273,12 @@ export class Swarm {
     f.target.set(rand(-bounds, bounds) * 1.3, rand(-0.35, 0.45), rand(-0.6, 0.35));
   }
 
+  /**
+   * Your hands, in the web frame: a fly veers away from a hand that comes near, and a quick sweep carries
+   * it along, so you can shoo flies toward your web.
+   */
+  hands: { p: Vector3; v: Vector3 }[] = [];
+
   update(dt: number, t: number, web: Web, bounds: number) {
     for (const f of this.flies) {
       f.age += dt;
@@ -291,6 +298,26 @@ export class Swarm {
         desired.y += Math.sin(t * 5.3 + f.age) * 0.06 + (Math.random() - 0.5) * 0.2;
         desired.z += (Math.random() - 0.5) * 0.2;
         f.v.lerp(desired, 1 - Math.exp(-dt * (f.hover > 0 ? 6 : 3.2)));
+        for (const h of this.hands) {
+          const dx = f.p.x - h.p.x, dy = f.p.y - h.p.y, dz = f.p.z - h.p.z;
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (d > 0.16 || d < 1e-4) continue;
+          const k = 1 - d / 0.16;
+          // startled off the hand and toward the web (it flees forward, away from you), and carried along
+          // by a deliberate sweep. Ordinary steering moves are too slow to fling flies around.
+          const hs = Math.hypot(h.v.x, h.v.y, h.v.z);
+          const carry = hs > 0.5 ? k * 6 * dt : 0;
+          f.v.x += (dx / d) * k * 2.5 * dt + h.v.x * carry;
+          f.v.y += (dy / d) * k * 2.5 * dt + h.v.y * carry;
+          f.v.z += -k * 3 * dt + Math.min(0, h.v.z) * carry;
+          f.hover = 0;
+          f.retarget = Math.max(f.retarget, 0.6); // it keeps its new heading a moment
+          f.target.copy(f.p).addScaledVector(f.v, 0.8);
+          f.startled = 0.6;
+        }
+        if (f.startled > 0) f.startled -= dt;
+        const sp = f.v.length();
+        if (sp > 1.6) f.v.multiplyScalar(1.6 / sp);
         const prevZ = f.p.z;
         f.p.addScaledVector(f.v, dt);
         if (f.p.y < web.floorY + 0.05) f.v.y = Math.abs(f.v.y);
