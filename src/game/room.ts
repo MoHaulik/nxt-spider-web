@@ -4,6 +4,9 @@
 
 import { Matrix4, Vector3 } from '@iwsdk/core';
 
+// filming in the emulator's large room: let the frame lines reach its far walls
+const REACH = new URLSearchParams(location.search).has('film') ? 4.2 : 2.4;
+
 export type Anchor = { pos: Vector3; label: string; angle: number };
 export type Site = { pos: Vector3; normal: Vector3; label: string };
 export type Room = { ceilY: number; floorY: number; anchors: Anchor[]; planes: number; sites: Site[]; blocked: number | null };
@@ -69,13 +72,13 @@ export function scanRoom(frame: XRFrame | null, ref: XRReferenceSpace | null, to
     const deg = (a * 180) / Math.PI;
     if (deg > 62 && deg < 118) continue; // straight up belongs to the dragline
     const d = new Vector3(Math.cos(a), Math.sin(a), 0);
-    let hit = cast(d, 2.4);
+    let hit = cast(d, REACH);
     if (!hit && d.y < -0.15) hit = { t: floorY / d.y, label: 'floor', n: new Vector3(0, 1, 0) };
     if (!hit && d.y > 0.25) {
       const t = ceilY / d.y;
       if (t < 2.6) hit = { t, label: up ? 'ceiling' : 'above', n: new Vector3(0, -1, 0) };
     }
-    if (!hit || hit.t > 2.6) continue;
+    if (!hit || hit.t > REACH + 0.2) continue;
     cands.push({ pos: d.multiplyScalar(hit.t), label: hit.label, angle: a });
   }
   // prefer real surfaces, then short lines; keep them well spread around the web

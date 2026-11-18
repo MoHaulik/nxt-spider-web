@@ -103,6 +103,14 @@ export const CFG = {
   rainGap: [200, 320] as [number, number],
 };
 
+// filming: the web a long session builds, built on camera (full silk, a quicker spiral)
+if (q.has('film')) {
+  CFG.silkBase = 6;
+  CFG.silkMax = 6;
+  CFG.silkRegen = 0.2;
+  CFG.rungEvery = 0.14;
+}
+
 if (FLAGS.fast) {
   CFG.firstRain = 25;
   CFG.rainLatest = 40;

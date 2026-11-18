@@ -38,6 +38,8 @@ Everyone has stopped to watch a spider come down on a single thread. We wanted t
 
 At first a spider coming into your room is a little scary, and your heart beats faster as it drops from your ceiling. Then it follows your hand, and the two of you build a web together. By the end, the thing you flinched from has become a small friend you come back to every day.
 
+It is a zen game, made for relaxation: no score, no timer, nothing to lose. Just a slow, quiet ritual with something alive, in the room where you live.
+
 ## What it does
 Point, and the spider swings there on its dragline. Swing it toward a real wall, the floor or your sofa and it casts a line that zips out and ties there: the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, tap again to tie it off. Threads across the middle become radii through a hub, and the spider lays the sticky spiral where you sweep it, as orb-weavers really build.
 
