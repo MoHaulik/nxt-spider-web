@@ -31,30 +31,23 @@ A spider descends into your real room. Swing it to tie a web to your walls, feed
 WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub Pages
 ```
 
-## About the project (≈500 words)
+## About the project (under 500 words)
 ```
 ## Inspiration
-Everyone has stopped to watch a spider come down on a single thread. We wanted that moment in mixed reality, treated like cinema rather than a toy. Gossamer has no words, menus or score in the world. Your room dims, something glints on your real ceiling, and a small spider lowers itself, perfectly straight, until it hangs at arm's length in front of you. Then it is yours.
+Everyone has stopped to watch a spider come down on a single thread. We wanted that moment in mixed reality, treated like cinema rather than a toy. No words, menus or score in the world. Your room dims, something glints on your real ceiling, and a small spider lowers itself until it hangs at arm's length in front of you. Then it is yours.
 
 ## What it does
-Point with your hand and the spider swings there on its dragline. Swing it out toward a real wall, the floor or your sofa and it casts a line that zips out and ties there. That is the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, swing, and tap again to tie it off. Threads across the middle become true radii through a hub, and the spider lays the sticky spiral wherever you sweep it, the way orb-weavers really build. You choose the architecture; the spider does the craft.
+Point, and the spider swings there on its dragline. Swing it toward a real wall, the floor or your sofa and it casts a line that zips out and ties there: the scaffold, tied to your room, so every room gives a different web. Tap your fingers to start a thread, tap again to tie it off. Threads across the middle become radii through a hub, and the spider lays the sticky spiral where you sweep it, as orb-weavers really build.
 
-Silk isn't free: the spider spins only what it has eaten for, and you can see it in how plump it is. You don't chase flies. The web catches them, and your real hands can help: a fly veers away from your hand, a quick sweep shoos it into the silk, and if you hold a finger still, a fly may land on it. Flick, and it flies off along your flick, often straight into the web. Pinch one out of the air and feed it to your spider by hand, or poke a caught fly until it tears free. A caught fly shakes the whole web, and the spider takes it the moment you bring it close. With every meal it grows from a spiderling to a garden spider.
+You don't chase flies; the web catches them, and your real hands help. A fly veers from your hand, a sweep shoos it into the silk, and if you hold a finger still a fly may land on it: flick, and it flies into the web. Pinch one from the air and feed your spider by hand. With every meal it grows.
 
-Then the story turns. Rain falls around you and between you and the web. Drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls from one side of the room. Hold still and it passes; move in the open and it tears through. Only then come eggs. After the right meal, a place at the top of your frame lights up. Swing the spider there and it lays its eggs, wrapping the sac in silk, turn by turn. After rain, in the sun, the sac opens. Spiderlings balloon out to real surfaces in your room and build their own small webs.
+Then the story turns. Rain falls around you; drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls; hold still and it passes. After the right meal, a place at the top of your web lights up: swing the spider there and it lays its eggs, wrapping the sac in silk. After rain, in the sun, the sac opens and spiderlings balloon out to real surfaces in your room and build their own small webs.
 
 ## A reason to come back
-The web stays anchored where you left it. While you're away the spider wraps the flies it catches and saves them for you, and its families grow. Gossamer keeps your real time of day: dew and gold light in the morning, amber evenings, moonlight at night. The landing page says one line, your chapter: Build a home. Maintain a web. Grow a family. Let them go. Fill the room.
+The web stays anchored where you left it. While you're away the spider wraps the flies it catches and saves them for you, and its families grow. Real time of day sets the light: dewy gold mornings, amber evenings, moonlit nights. The landing page says one line, your chapter: Build a home. Maintain a web. Grow a family. Let them go. Fill the room.
 
 ## How we built it
-WebXR on Meta's Immersive Web SDK with three.js. Everything is procedural and original. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Dew is rendered as instanced ball-lens drops with per-channel refraction. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and depth-only hand occluders let your real hands pass in front of the silk. All sound is synthesized and tuned to a pentatonic scale, so plucking the web plays it, under a generative score that grows with the ecosystem.
-
-## How it meets the brief
-- Hands-first, end to end: point, pinch, sweep, flick; no controller is ever needed.
-- Seated, within two feet: a web at arm's length in the central field of view; small hand movements steer, and you can touch the far silk by jabbing at what your fingertip covers.
-- Passthrough with purpose: scene understanding ties the web to your real ceiling, walls, floor and furniture, and the brood settles on real surfaces. In another room it is a different game; facing a wall at a desk, the web steps in front of it.
-- Persistent anchors and real time of day drive repeat usage: the web, its stored meals and its families are waiting tomorrow.
-- A payoff inside the first minute (the first catch), taught without a word.
+WebXR on Meta's Immersive Web SDK with three.js; everything procedural and original. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and hand occluders let your real hands pass in front of the silk. All sound is synthesized; plucking the web plays it. Hands-first and seated: everything is reachable within two feet, and the first payoff, a catch, comes inside a minute.
 
 ## What's next
 More species and web architectures, seasons, and shared rooms where two people's spiders build together, on the Meta Horizon Store.
