@@ -24,11 +24,11 @@ A spider descends into your real room. Swing it to tie a web to your walls, feed
 ## Links
 - Playable build (open in the Meta Quest browser): `https://mohaulik.github.io/nxt-spider-web/`
 - Source code: `https://github.com/MoHaulik/nxt-spider-web`
-- Video: **[Morten: public YouTube link, under 3 minutes]**
+- Video: https://www.youtube.com/watch?v=2AowjEyFd0M
 
 ## Built with (tags)
 ```
-NXT, WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub Pages
+NXT/WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub Pages
 ```
 
 ## About the project (under 500 words)
@@ -51,7 +51,7 @@ Then the story turns. Rain falls around you; drops swell on your ceiling and let
 The web stays anchored where you left it. While you're away the spider wraps the flies it catches and saves them for you, and its families grow. Real time of day sets the light: dewy gold mornings, amber evenings, moonlit nights. The landing page says one line, your chapter: Build a home. Maintain a web. Grow a family.
 
 ## How we built it
-An NXT WebXR original: it runs from a link in the Quest browser, with no install. Built on Meta's Immersive Web SDK with three.js; everything procedural. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and hand occluders let your real hands pass in front of the silk. All sound is synthesized; plucking the web plays it. Hands-first and seated: everything is reachable within two feet, and the first payoff, a catch, comes inside a minute.
+An NXT/WebXR original: it runs from a link in the Quest browser, with no install. Built on Meta's Immersive Web SDK with three.js; everything procedural. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and hand occluders let your real hands pass in front of the silk. All sound is synthesized; plucking the web plays it. Hands-first and seated: everything is reachable within two feet, and the first payoff, a catch, comes inside a minute.
 
 ## What's next
 More species and web architectures, seasons, and shared rooms where two people's spiders build together, on the Meta Horizon Store.
