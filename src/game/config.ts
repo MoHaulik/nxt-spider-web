@@ -11,6 +11,7 @@ export const FLAGS = {
   fps: q.has('fps'), // frame-rate readout below your line of sight, for headset testing
   closeup: q.has('closeup'), // desktop preview: camera close to the web
   bot: q.has('bot'), // desktop preview: a hand that plays by itself
+  showhands: q.has('showhands'), // emulator filming: draw the emulated hands (on a headset your real hands show in passthrough)
 };
 
 export const CFG = {

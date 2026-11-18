@@ -857,7 +857,7 @@ export class Game {
 
   private hideInputVisuals(dt: number) {
     this.hideClock -= dt;
-    if (this.hideClock > 0) return;
+    if (this.hideClock > 0 || FLAGS.showhands) return;
     this.hideClock = 0.1;
     this.world.player.traverse((o: Object3D) => {
       if (o === this.hands.occluder || o === this.fps?.mesh) return;
@@ -1575,6 +1575,7 @@ export class Game {
   private birdSide = 1;
   private birdHit = false;
   private birdTore = false;
+  private birdTearLeft = 0;
   private shadow = 0;
   private stun = 0;
   private carry = 0;
@@ -1602,6 +1603,11 @@ export class Game {
         this.audio.whoosh(this.wpos({ x: this.birdSide * 0.8, y: this.S.y + 0.3, z: -0.5 }));
         this.birdHit = false;
         this.birdTore = false;
+        // it takes a bite out of the sticky spiral, never the radii or the frame: a raid leaves a hole
+        // to mend, not a web on the floor
+        let cap = 0;
+        for (let c = 0; c < this.web.nC; c++) if (this.web.cAlive[c] && this.web.kind[c] === CAPTURE) cap++;
+        this.birdTearLeft = Math.ceil(cap * 0.32);
         for (const f of this.swarm.flies) if (f.state === 'fly') f.leaving = true;
       }
     }
@@ -1624,11 +1630,13 @@ export class Game {
     w.onBreak = undefined;
     let torn = 0;
     for (let c = 0; c < w.nC; c++) {
-      if (!w.cAlive[c] || w.kind[c] === MOOR) continue;
+      if (this.birdTearLeft <= 0) break;
+      if (!w.cAlive[c] || w.kind[c] !== CAPTURE) continue;
       const i = w.ca[c] * 3, j = w.cb[c] * 3;
       const mx = (w.p[i] + w.p[j]) / 2 - b.x, my = (w.p[i + 1] + w.p[j + 1]) / 2 - b.y;
       if (Math.abs(mx) < 0.07 && Math.abs(my) < 0.055) {
         w.killC(c);
+        this.birdTearLeft--;
         torn++;
       }
     }
