@@ -28,7 +28,7 @@ A spider descends into your real room. Swing it to tie a web to your walls, feed
 
 ## Built with (tags)
 ```
-WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub Pages
+NXT, WebXR, Immersive Web SDK (IWSDK), three.js, TypeScript, Vite, Web Audio, GitHub Pages
 ```
 
 ## About the project (under 500 words)
@@ -44,10 +44,10 @@ You don't chase flies; the web catches them, and your real hands help. A fly vee
 Then the story turns. Rain falls around you; drops swell on your ceiling and let go, so you dodge. When the sun returns, every thread is beaded with dew, each drop a tiny lens. A bird calls; hold still and it passes. After the right meal, a place at the top of your web lights up: swing the spider there and it lays its eggs, wrapping the sac in silk. After rain, in the sun, the sac opens and spiderlings balloon out to real surfaces in your room and build their own small webs.
 
 ## A reason to come back
-The web stays anchored where you left it. While you're away the spider wraps the flies it catches and saves them for you, and its families grow. Real time of day sets the light: dewy gold mornings, amber evenings, moonlit nights. The landing page says one line, your chapter: Build a home. Maintain a web. Grow a family. Let them go. Fill the room.
+The web stays anchored where you left it. While you're away the spider wraps the flies it catches and saves them for you, and its families grow. Real time of day sets the light: dewy gold mornings, amber evenings, moonlit nights. The landing page says one line, your chapter: Build a home. Maintain a web. Grow a family.
 
 ## How we built it
-WebXR on Meta's Immersive Web SDK with three.js; everything procedural and original. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and hand occluders let your real hands pass in front of the silk. All sound is synthesized; plucking the web plays it. Hands-first and seated: everything is reachable within two feet, and the first payoff, a catch, comes inside a minute.
+An NXT WebXR original: it runs from a link in the Quest browser, with no install. Built on Meta's Immersive Web SDK with three.js; everything procedural. The web is a position-based (Verlet) simulation of thousands of silk particles that sag, snap and are repaired. Plane detection ties the web and the colonies to your real room, persistent anchors keep it there, and hand occluders let your real hands pass in front of the silk. All sound is synthesized; plucking the web plays it. Hands-first and seated: everything is reachable within two feet, and the first payoff, a catch, comes inside a minute.
 
 ## What's next
 More species and web architectures, seasons, and shared rooms where two people's spiders build together, on the Meta Horizon Store.
